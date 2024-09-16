@@ -1,11 +1,14 @@
 import { router } from 'expo-router';
 import * as React from 'react';
+import { deleteTable, createTables, getTableInfo } from '../api/database';
+import  { useState, useEffect } from 'react';
 import { List, Provider as PaperProvider } from 'react-native-paper';
 
 const MyComponent = () => {
   const [expanded, setExpanded] = React.useState(true);
 
   const handlePress = () => setExpanded(!expanded);
+
 
 
   return (

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { DataTable } from 'react-native-paper';
-import { TouchableOpacity } from 'react-native';
+import { TouchableOpacity, StyleSheet } from 'react-native';
 
 interface Column {
   title: string;
@@ -13,11 +13,13 @@ interface ReusableTableProps {
   data: any[];
   itemsPerPageOptions?: number[];
   onRowPress?: (item: any) => void;
+  rowStyle?: (item: any) => any; // Añadir esta línea
 }
 
 const ReusableTable: React.FC<ReusableTableProps> = ({
   columns,
   data,
+  rowStyle,
   itemsPerPageOptions = [10],
   onRowPress,
 }) => {
@@ -43,7 +45,7 @@ const ReusableTable: React.FC<ReusableTableProps> = ({
 
       {data.slice(from, to).map((item, index) => (
         <TouchableOpacity key={index} onPress={() => onRowPress && onRowPress(item)}>
-          <DataTable.Row>
+          <DataTable.Row style={rowStyle ? rowStyle(item) : null}>
             {columns.map((column) => (
               <DataTable.Cell key={column.key} numeric={column.numeric}>
                 {item[column.key]}
@@ -66,5 +68,11 @@ const ReusableTable: React.FC<ReusableTableProps> = ({
     </DataTable>
   );
 };
+
+const styles = StyleSheet.create({
+  lowStockRow: {
+    backgroundColor: '#ffcccc', // Color rojo claro
+  },
+});
 
 export default ReusableTable;

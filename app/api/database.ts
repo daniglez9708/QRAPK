@@ -1,10 +1,15 @@
 import * as SQLite from 'expo-sqlite';
+import { startOfWeek, endOfWeek, subWeeks, format } from 'date-fns';
 
 export interface Product {
     id: number;
     name: string;
     price: number;
+    stock: number;
+    isAvailable: boolean;
+    image: string | null;
 }
+
 export interface Sale {
     id: number;
     date: string;
@@ -32,7 +37,10 @@ export const createTables = async () => {
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
-            price REAL
+            price REAL,
+            stock INTEGER,
+            isAvailable INTEGER,
+            image TEXT
         );
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,8 +57,8 @@ export const createTables = async () => {
     `);
 }
 
-export const insertProduct = async (name: string, price: number) => {
-    const result = await (await db).runAsync('INSERT INTO products (name, price) VALUES (?, ?)', [name, price]);
+export const insertProduct = async (name: string, price: number, stock: number, isAvailable: boolean, image: string | null) => {
+    const result = await (await db).runAsync('INSERT INTO products (name, price, stock, isAvailable, image) VALUES (?, ?, ?, ?, ?)', [name, price, stock, isAvailable ? 1 : 0, image]);
 }
 
 export const getProducts = async (): Promise<Product[]> => {
@@ -59,6 +67,9 @@ export const getProducts = async (): Promise<Product[]> => {
         id: row.id,
         name: row.name,
         price: row.price,
+        stock: row.stock,
+        isAvailable: row.isAvailable === 1,
+        image: row.image,
         // Mapea otros campos según tu esquema de base de datos
     }));
     return products;
@@ -67,14 +78,12 @@ export const getProducts = async (): Promise<Product[]> => {
 export const fetchProductById = async (id: number): Promise<Product | null> => {
     const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ?', [id]) as Product | null;
     if (product) {
-        console.log(product);
         return product;
     } else {
         console.error('Product not found');
         return null;
     }
 }
-
 export const insertSale = async (date: string, total: number) => {
     const result = await (await db).runAsync('INSERT INTO sales (date, total) VALUES (?, ?)', [date, total]);
 }
@@ -138,7 +147,6 @@ export const getSalesWithProducts = async (): Promise<SaleProduct[]> => {
                 price: row.price
             });
         });
-console.log(Object.values(salesMap));
 
         return Object.values(salesMap);
     } catch (error) {
@@ -150,7 +158,7 @@ export const getTableInfo = async (tableName: string) => {
     const database = await db;
     try {
         const result = await database.getAllAsync(`PRAGMA table_info(${tableName});`);
-        console.log(`Estructura de la tabla ${tableName}:`, result);
+        
         return result;
     } catch (error) {
         console.error(`Error al obtener la estructura de la tabla ${tableName}:`, error);
@@ -162,7 +170,7 @@ export  const deleteTable = async() =>{
     try {
         const result = await database.runAsync('DROP TABLE IF EXISTS sales_products');
         const result1 = await database.runAsync('DROP TABLE IF EXISTS sales');
-        console.log('Tabla eliminada');
+        const result2 = await database.runAsync('DROP TABLE IF EXISTS products');
         return result;
     } catch (error) {
         console.error('Error al eliminar la tabla:', error);
@@ -179,18 +187,19 @@ export const sumSalesTotal = async (): Promise<number> => {
         throw error;
     }
 }
-export const getMostSoldProduct = async (): Promise<{ name: string, quantity: number } | null> => {
+export const getMostSoldProduct = async (): Promise<{ name: string, quantity: number, price: number } | null> => {
     const database = await db;
     try {
         const result: any = await database.getFirstAsync(`
-            SELECT p.name, SUM(sp.quantity) as totalQuantity
+            SELECT p.name, SUM(sp.quantity) as totalQuantity, p.price
             FROM sales_products sp
             JOIN products p ON sp.product_id = p.id
-            GROUP BY sp.product_id
+            GROUP BY sp.product_id, p.price
             ORDER BY totalQuantity DESC
             LIMIT 1
         `);
-        return result ? { name: result.name, quantity: result.totalQuantity } : null;
+        
+        return result ? { name: result.name, quantity: result.totalQuantity, price: result.price } : null;
     } catch (error) {
         console.error('Error al obtener el producto más vendido:', error);
         throw error;
@@ -200,6 +209,75 @@ export const getProductById = async (id: string): Promise<Product | null> => {
     const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ?', [id]) as Product | null;
     return product;
 }
-export const updateProduct = async (id: string, name: string, price: number) => {
-    await (await db).runAsync('UPDATE products SET name = ?, price = ? WHERE id = ?', [name, price, id]);
+export const updateProduct = async (id: string, name: string, price: number, stock: number, isAvailable: boolean, image: string | null) => {
+    await (await db).runAsync('UPDATE products SET name = ?, price = ?, stock = ?, isAvailable = ?, image = ? WHERE id = ?', [name, price, stock, isAvailable ? 1 : 0, image, id]);
+}
+
+
+export const getTotalSalesByCurrentWeek = async (): Promise<{ date: string, total: number }[]> => {
+    const database = await db;
+    const today = new Date();
+    const startOfWeekDate = startOfWeek(today, { weekStartsOn: 1 }); // La semana empieza el lunes
+    const formattedStartOfWeekDate = format(startOfWeekDate, 'yyyy-MM-dd');
+    const formattedTodayDate = format(today, 'yyyy-MM-dd');
+
+    try {
+        const rows = await database.getAllAsync(`
+            SELECT strftime('%Y-%m-%d', date) as date, SUM(total) as total
+            FROM sales
+            WHERE date(date) BETWEEN date(?) AND date(?)
+            GROUP BY strftime('%Y-%m-%d', date)
+            ORDER BY date
+        `, [formattedStartOfWeekDate, formattedTodayDate]) as any[];
+
+        // Mapea los resultados de la consulta a un formato más manejable
+        const totalSalesByCurrentWeek = rows.map(row => ({
+            date: row.date,
+            total: row.total,
+        }));
+        
+        return totalSalesByCurrentWeek;
+    } catch (error) {
+        console.error('Error al obtener el total de ventas de la semana actual:', error);
+        throw error;
+    }
+};
+
+export const getTotalSalesByWeek = async (date: Date): Promise<number> => {
+    const database = await db;
+    const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 }); // La semana empieza el lunes
+    const endOfWeekDate = endOfWeek(date, { weekStartsOn: 1 });
+    const formattedStartOfWeekDate = format(startOfWeekDate, 'yyyy-MM-dd');
+    const formattedEndOfWeekDate = format(endOfWeekDate, 'yyyy-MM-dd');
+
+    try {
+        const result: any = await database.getFirstAsync(`
+            SELECT SUM(total) as totalSum
+            FROM sales
+            WHERE date BETWEEN ? AND ?
+        `, [formattedStartOfWeekDate, formattedEndOfWeekDate]);
+
+        return result.totalSum || 0;
+    } catch (error) {
+        console.error('Error al obtener el total de ventas de la semana:', error);
+        throw error;
+    }
+};
+export const getSalesDifferenceWithPreviousWeek = async (): Promise<number> => {
+    const today = new Date();
+    const previousWeekDate = subWeeks(today, 1);
+
+    try {
+        const currentWeekSales = await getTotalSalesByWeek(today);
+        const previousWeekSales = await getTotalSalesByWeek(previousWeekDate);
+
+        const difference = currentWeekSales - previousWeekSales;
+        return difference;
+    } catch (error) {
+        console.error('Error al calcular la diferencia de ventas con la semana anterior:', error);
+        throw error;
+    }
+};
+export const deleteProduct = async () => {
+    await (await db).runAsync('DELETE FROM products WHERE id = 9');
 }

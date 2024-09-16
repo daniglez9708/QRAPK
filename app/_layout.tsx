@@ -4,6 +4,7 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
+import { StatusBar } from 'react-native';
 import 'react-native-reanimated';
 
 //import { useColorScheme } from '@/components/useColorScheme';
@@ -27,33 +28,24 @@ export default function RootLayout() {
     ...FontAwesome.font,
   });
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
   if (!loaded) {
     return null;
   }
 
-  return <RootLayoutNav />;
-}
-
-function RootLayoutNav() {
-
   return (
-    <ThemeProvider value={DefaultTheme}>
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="#6a51ae" />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="screen" options={{ headerShown: false }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        <Stack.Screen name="screen/admin_product" options={{ title: 'Admin Product' }} />
+        <Stack.Screen name="screen/admin_ventas" options={{ title: 'Admin Ventas' }} />
+        <Stack.Screen name="screen/form_product" options={{ title: 'Form Product' }} />
+        <Stack.Screen name="screen/home" options={{ title: 'Home' }} />
+        <Stack.Screen name="screen/reporte_ventas" options={{ title: 'Reporte Ventas' }} />
+        <Stack.Screen name="screen/test" options={{ title: 'Test' }} />
+        <Stack.Screen name="screen/venta_detalles" options={{ title: 'Venta Detalles' }} />
       </Stack>
-    </ThemeProvider>
+    </>
   );
 }

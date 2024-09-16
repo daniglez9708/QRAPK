@@ -1,23 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ToastAndroid } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
 import { IconButton, Card, Divider, Dialog, Portal, Button, PaperProvider } from 'react-native-paper';
 import { fetchProductById, addSaleWithProducts, deleteTable, getTableInfo, createTables } from '../api/database';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast from 'react-native-toast-message';
 
 interface ScannedItem {
   id: number;
   name: string;
   price: number;
   quantity: number;
+  image: string | null; // Allow null as a valid value
 }
-
-const productImage = require('../../assets/images/productos/frijoles.png');
 
 const ScannedDataScreen = () => {
   const { scannedData } = useLocalSearchParams<{ scannedData: string }>();
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [visible, setVisible] = useState(false);
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -56,7 +58,8 @@ const ScannedDataScreen = () => {
             id: fetchedData.id,
             name: fetchedData.name,
             price: fetchedData.price,
-            quantity: 1 // Asignar una cantidad inicial
+            quantity: 1, // Asignar una cantidad inicial
+            image: fetchedData.image, // Asignar la URL de la imagen
           };
           setScannedItems((prevItems) => [...prevItems, productData]);
           storeScannedData(productData);
@@ -90,7 +93,17 @@ const ScannedDataScreen = () => {
       await addSaleWithProducts(date, total, products);
       await AsyncStorage.clear();
       setVisible(false); // Ocultar el diálogo después de aceptar
-      ToastAndroid.show('Venta realizada con éxito!', ToastAndroid.SHORT);
+      Toast.show({
+        type: 'success',
+        text1: 'Venta realizada con éxito!',
+        text2: 'Gracias por su compra.',
+        position: 'bottom',
+        visibilityTime: 4000,
+        autoHide: true,
+        topOffset: 30,
+        bottomOffset: 40,
+      });
+      router.push('/(tabs)/two'); // Redirigir a la pantalla principal
     } catch (error) {
       console.error('Error clearing data:', error);
     }
@@ -116,8 +129,26 @@ const ScannedDataScreen = () => {
     });
   };
 
+  const handleRemoveItem = (id: number) => {
+    setItemToDelete(id);
+    setDeleteVisible(true);
+  };
+
+  const confirmRemoveItem = () => {
+    if (itemToDelete !== null) {
+      setScannedItems((prevItems) => {
+        const updatedItems = prevItems.filter(item => item.id !== itemToDelete);
+        AsyncStorage.setItem('scannedItems', JSON.stringify(updatedItems));
+        return updatedItems;
+      });
+      setDeleteVisible(false);
+      setItemToDelete(null);
+    }
+  };
+
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
+  const hideDeleteDialog = () => setDeleteVisible(false);
 
   return (
     <PaperProvider>
@@ -130,7 +161,7 @@ const ScannedDataScreen = () => {
               renderItem={({ item }) => (
                 <Card style={styles.card}>
                   <View style={styles.dataContainer}>
-                    <Image source={productImage} style={styles.image} />
+                    <Image source={{ uri: item.image ?? '' }} style={styles.image} />
                     <View style={styles.textContainer}>
                       <Text style={styles.dataText}>Name: {item.name}</Text>
                       <Text style={styles.dataText}>Price: ${item.price.toFixed(2)}</Text>
@@ -143,6 +174,9 @@ const ScannedDataScreen = () => {
                           <IconButton icon="plus-box" size={20} iconColor="#183762" />
                         </TouchableOpacity>
                       </View>
+                      <TouchableOpacity onPress={() => handleRemoveItem(item.id)} style={styles.removeButton}>
+                        <IconButton icon="delete" size={20} iconColor="#ff0000" />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </Card>
@@ -150,24 +184,49 @@ const ScannedDataScreen = () => {
             />
             <Divider />
             <Text style={styles.total}>Total: ${scannedItems.reduce((acc, item) => acc + item.price * item.quantity, 0).toFixed(2)}</Text>
-            <Button onPress={handleRescan}>Volver a escanear</Button>
-            <Button onPress={showDialog}>Aceptar venta</Button>
+            <View style={styles.buttonContainer}>
+              <Button onPress={handleRescan} icon="qrcode" style={[styles.button, styles.blueButton]} labelStyle={styles.buttonText}>
+                Volver a escanear
+              </Button>
+              <Button onPress={showDialog} icon="check" style={[styles.button, styles.blueButton]} labelStyle={styles.buttonText}>
+                Aceptar venta
+              </Button>
+            </View>
           </>
         ) : (
           <Text style={styles.errorText}>No data received</Text>
         )}
         <Portal>
-          <Dialog visible={visible} onDismiss={hideDialog}>
-            <Dialog.Title>Confirmación</Dialog.Title>
+          <Dialog visible={visible} onDismiss={hideDialog} style={styles.dialog}>
+            <Dialog.Title style={styles.dialogTitle}>Confirmación</Dialog.Title>
             <Dialog.Content>
-              <Text>¿Está seguro de que desea aceptar la venta?</Text>
+              <Text style={styles.dialogText}>¿Está seguro de que desea aceptar la venta?</Text>
             </Dialog.Content>
             <Dialog.Actions>
-              <Button onPress={hideDialog}>Cancelar</Button>
-              <Button onPress={handleClearData}>Aceptar</Button>
+              <Button onPress={hideDialog} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="close">
+                Cancelar
+              </Button>
+              <Button onPress={handleClearData} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="check">
+                Aceptar
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
+          <Dialog visible={deleteVisible} onDismiss={hideDeleteDialog} style={styles.dialog}>
+            <Dialog.Title style={styles.dialogTitle}>Confirmación</Dialog.Title>
+            <Dialog.Content>
+              <Text style={styles.dialogText}>¿Está seguro de que desea eliminar este producto?</Text>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={hideDeleteDialog} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="close">
+                Cancelar
+              </Button>
+              <Button onPress={confirmRemoveItem} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="check">
+                Eliminar
+              </Button>
             </Dialog.Actions>
           </Dialog>
         </Portal>
+        <Toast />
       </View>
     </PaperProvider>
   );
@@ -232,12 +291,46 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
   },
+  removeButton: {
+    marginLeft: 16,
+  },
   total: {
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
     marginVertical: 16,
     color: '#102341',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 16,
+  },
+  button: {
+    flex: 1,
+    marginHorizontal: 8,
+  },
+  blueButton: {
+    backgroundColor: '#2878cf',
+  },
+  buttonText: {
+    color: 'white',
+  },
+  dialog: {
+    backgroundColor: 'white',
+  },
+  dialogTitle: {
+    color: '#2878cf',
+  },
+  dialogText: {
+    color: '#2878cf',
+  },
+  dialogButton: {
+    backgroundColor: '#2878cf',
+    marginHorizontal: 8,
+  },
+  dialogButtonText: {
+    color: 'white',
   },
 });
 
