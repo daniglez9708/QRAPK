@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
-import { IconButton, Card, Divider, Dialog, Portal, Button, PaperProvider } from 'react-native-paper';
+import { IconButton, Card, Divider, Dialog, Portal, Button, PaperProvider, Snackbar } from 'react-native-paper';
 import { fetchProductById, addSaleWithProducts, deleteTable, getTableInfo, createTables } from '../api/database';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +20,8 @@ const ScannedDataScreen = () => {
   const [visible, setVisible] = useState(false);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -93,16 +95,10 @@ const ScannedDataScreen = () => {
       await addSaleWithProducts(date, total, products);
       await AsyncStorage.clear();
       setVisible(false); // Ocultar el diálogo después de aceptar
-      Toast.show({
-        type: 'success',
-        text1: 'Venta realizada con éxito!',
-        text2: 'Gracias por su compra.',
-        position: 'bottom',
-        visibilityTime: 4000,
-        autoHide: true,
-        topOffset: 30,
-        bottomOffset: 40,
-      });
+      
+      setSnackbarMessage('Venta realizada con éxito');
+      setSnackbarVisible(true);
+
       router.push('/(tabs)/two'); // Redirigir a la pantalla principal
     } catch (error) {
       console.error('Error clearing data:', error);
@@ -226,6 +222,19 @@ const ScannedDataScreen = () => {
             </Dialog.Actions>
           </Dialog>
         </Portal>
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          duration={3000}
+          action={{
+            label: 'OK',
+            onPress: () => {
+              setSnackbarVisible(false);
+            },
+          }}
+        >
+          {snackbarMessage}
+        </Snackbar>
         <Toast />
       </View>
     </PaperProvider>

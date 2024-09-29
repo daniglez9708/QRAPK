@@ -3,6 +3,7 @@ import * as React from 'react';
 import { deleteTable, createTables, getTableInfo } from '../api/database';
 import  { useState, useEffect } from 'react';
 import { List, Provider as PaperProvider } from 'react-native-paper';
+// import User from '@/components/User';
 
 const MyComponent = () => {
   const [expanded, setExpanded] = React.useState(true);
@@ -24,7 +25,9 @@ const MyComponent = () => {
           <List.Item title="Ventas" titleStyle={{ color: 'black' }} onPress={() => router.push('/screen/admin_ventas')}/>
         </List.Accordion>
       </List.Section>
+      
     </PaperProvider>
+    
   );
 };
 

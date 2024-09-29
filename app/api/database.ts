@@ -21,6 +21,7 @@ export interface SaleProduct {
     date: string;
     total: number;
     products: {
+        id: number;
         name: string;
         quantity: number;
         price: number;
@@ -102,6 +103,7 @@ export const addSaleWithProducts = async (date: string, total: number, products:
     // Insertar los productos de la venta
     for (const product of products) {
         await (await db).runAsync('INSERT INTO sales_products (sale_id, product_id, quantity) VALUES (?, ?, ?)', [saleId, product.product_id, product.quantity]);
+        await (await db).runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [product.quantity, product.product_id]);
     }
 }
 export const getSales = async (): Promise<Sale[]> => {
@@ -142,6 +144,7 @@ export const getSalesWithProducts = async (): Promise<SaleProduct[]> => {
                 };
             }
             salesMap[row.sale_id].products.push({
+                id: row.product_id,
                 name: row.name,
                 quantity: row.quantity,
                 price: row.price
@@ -177,13 +180,38 @@ export  const deleteTable = async() =>{
         throw error;
     }
 }
-export const sumSalesTotal = async (): Promise<number> => {
+export const logSalesDates = async () => {
     const database = await db;
     try {
-        const result: any = await database.getFirstAsync('SELECT SUM(total) as totalSum FROM sales');
-        return result.totalSum;
+        const results: any[] = await database.getAllAsync('SELECT date FROM sales LIMIT 5');
+        console.log('Fechas de ventas:', results);
     } catch (error) {
-        console.error('Error al sumar los totales de ventas:', error);
+        console.error('Error al obtener las fechas de ventas:', error);
+        throw error;
+    }
+}
+
+export const sumDailySalesTotal = async (): Promise<{ totalSum: number, totalProductsSold: number }> => {
+    const database = await db;
+    try {
+        const today = new Date().toISOString().split('T')[0]; // Obtener la fecha actual en formato YYYY-MM-DD
+        const result: any = await database.getFirstAsync(`
+            SELECT 
+                SUM(s.total) as totalSum, 
+                SUM(sp.quantity) as totalProductsSold 
+            FROM 
+                sales s
+            JOIN 
+                sales_products sp ON s.id = sp.sale_id
+            WHERE 
+                DATE(s.date) = DATE(?)
+        `, [today]);
+        return {
+            totalSum: result.totalSum,
+            totalProductsSold: result.totalProductsSold
+        };
+    } catch (error) {
+        console.error('Error al sumar los totales de ventas y la cantidad de productos vendidos del día:', error);
         throw error;
     }
 }
@@ -281,3 +309,22 @@ export const getSalesDifferenceWithPreviousWeek = async (): Promise<number> => {
 export const deleteProduct = async () => {
     await (await db).runAsync('DELETE FROM products WHERE id = 9');
 }
+export const getLowStockProducts = async (): Promise<Product[]> => {
+    const database = await db;
+    const threshold = 20; // Umbral de stock bajo
+    try {
+        const rows = await database.getAllAsync('SELECT * FROM products WHERE stock < ? ORDER BY stock ASC', [threshold]) as any[];
+        const lowStockProducts: Product[] = rows.map(row => ({
+            id: row.id,
+            name: row.name,
+            price: row.price,
+            stock: row.stock,
+            isAvailable: row.isAvailable === 1,
+            image: row.image,
+        }));
+        return lowStockProducts;
+    } catch (error) {
+        console.error('Error al obtener los productos con poco stock:', error);
+        throw error;
+    }
+};

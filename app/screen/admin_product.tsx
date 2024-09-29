@@ -7,6 +7,7 @@ import ReusableTable from '@/components/ReusableTable'; // Ajusta la ruta según
 import * as FileSystem from 'expo-file-system';
 import { PDFDocument, PDFPage } from 'react-native-pdf-lib';
 
+
 const AdminProduct = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -150,7 +151,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#2878cf',
+    backgroundColor: '#164076',
     padding: 10,
     borderRadius: 5,
     marginBottom: 16,

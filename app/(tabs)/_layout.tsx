@@ -1,13 +1,13 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
+import { Link, Tabs, Stack } from 'expo-router';
 import { Pressable, StatusBar } from 'react-native';
-
 import Colors from '@/constants/Colors';
-//import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { supabase } from '../../app/api/supabaseConfig';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import UserForm from '@/components/User'; 
 
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
   color: string;
@@ -16,11 +16,23 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
-  //const colorScheme = useColorScheme();
+  //const [supabaseUser, setSupabaseUser] =
+   //useState<SupabaseUser | null>(null);
+
+  
+
+    //const { data: { subscription: supabaseSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      //setSupabaseUser(session?.user ?? null);
+    //});
+
+  //const user =  supabaseUser;
+  
+  /*if (!user) {
+    return <UserForm />;
+  }*/
 
   return (
     <>
-      <StatusBar backgroundColor={Colors['light'].tint} barStyle="light-content" />
       <Tabs
         screenOptions={{
           tabBarActiveTintColor: Colors['light'].tint,
@@ -36,20 +48,24 @@ export default function TabLayout() {
           name="two"
           options={{
             title: 'Inicio',
-            tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+            tabBarIcon: ({ color }) => (
+              <TabBarIcon name={"home"} color={color} />
+            ),
             headerRight: () => (
-              <Link href="/modal" asChild>
-                <Pressable>
-                  {({ pressed }) => (
-                    <FontAwesome
-                      name="info-circle"
-                      size={25}
-                      color={Colors['light'].text}
-                      style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                    />
-                  )}
-                </Pressable>
-              </Link>
+              
+                <Link href="/modal" asChild>
+                  <Pressable>
+                    {({ pressed }) => (
+                      <FontAwesome
+                        name="user"
+                        size={25}
+                        color={Colors['light'].text}
+                        style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
+                      />
+                    )}
+                  </Pressable>
+                </Link>
+              
             ),
           }}
         />

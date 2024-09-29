@@ -1,28 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Text } from 'react-native';
+import { View, StyleSheet, ScrollView, Text, TouchableOpacity } from 'react-native';
 import { Avatar, Button, Paragraph } from 'react-native-paper';
-import { sumSalesTotal, getMostSoldProduct, getSalesDifferenceWithPreviousWeek } from '../api/database';
+import { sumDailySalesTotal, getMostSoldProduct, getSalesDifferenceWithPreviousWeek, Product, getLowStockProducts } from '../api/database';
 import { useRouter } from 'expo-router';
 import SalesChart from '../../components/Grafico_dash';
 import { LinearGradient } from 'expo-linear-gradient';
+import { User as SupabaseUser } from '@supabase/supabase-js'; // Import the SupabaseUser type
+import { supabase } from '../api/supabaseConfig';
 
 const SalesAndExpensesPage: React.FC = () => {
   const [totalSales, setTotalSales] = useState<number | null>(null);
+  const [lowStock, setLowStock] = useState<Product[]>([]);
   const [mostSoldProduct, setMostSoldProduct] = useState<{ name: string, quantity: number, price: number } | null>(null);
   const [salesDifference, setSalesDifference] = useState<number | null>(null);
   const [expenses, setExpenses] = useState<number[]>([]);
   const [error, setError] = useState<string>('');
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [totalProductsSold, setTotalProductsSold] = useState<number | null>(null); // Nuevo estado
   const router = useRouter();
 
   useEffect(() => {
     const fetchTotalSales = async () => {
       try {
-        const total = await sumSalesTotal();
-        setTotalSales(total);
+        const { totalSum, totalProductsSold } = await sumDailySalesTotal();
+        setTotalSales(totalSum);
+        setTotalProductsSold(totalProductsSold); // Asegúrate de tener un estado para esto
       } catch (err) {
-        setError('Error al sumar los totales de ventas');
+        setError('Error al sumar los totales de ventas y la cantidad de productos vendidos');
       }
     };
+
     const fetchMostSoldProduct = async () => {
       try {
         const product = await getMostSoldProduct();
@@ -31,6 +38,7 @@ const SalesAndExpensesPage: React.FC = () => {
         setError('Error al obtener el producto más vendido');
       }
     };
+
     const fetchSalesDifference = async () => {
       try {
         const difference = await getSalesDifferenceWithPreviousWeek();
@@ -40,9 +48,34 @@ const SalesAndExpensesPage: React.FC = () => {
       }
     };
 
+    const fetchLowStockProducts = async () => {
+      try {
+        const products = await getLowStockProducts();
+        setLowStock(products);
+      } catch (err) {
+        setError('Error al obtener los productos con poco stock');
+      }
+    };
+
     fetchTotalSales();
     fetchMostSoldProduct();
     fetchSalesDifference();
+    fetchLowStockProducts();
+
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user ?? null);
+    };
+
+    getSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
@@ -55,43 +88,61 @@ const SalesAndExpensesPage: React.FC = () => {
           </View>
           <View style={styles.cardContent}>
             <View style={styles.row}>
-              <Paragraph style={styles.text1}>Productos vendidos {totalSales}</Paragraph>
+              <Paragraph style={styles.text1}>Productos vendidos: {totalProductsSold}</Paragraph>
             </View>
-            <Paragraph style={styles.text}>Total de Ventas: ${totalSales}</Paragraph>
+            <Paragraph style={styles.text1}>Total de Ventas: ${totalSales}</Paragraph>
           </View>
         </LinearGradient>
         
         <View style={styles.row}>
-          <LinearGradient colors={['#164076', '#1a5a9a', '#1e6cc7']} style={[styles.customCard, { width: '48%' }]}>
-            <View style={styles.cardTitleContainer}>
-              <Avatar.Icon icon="star" size={25} style={styles.icon} color="#102341" />
-              <Text style={styles.cardTitle}>Top Ventas</Text>
-            </View>
-            <View style={styles.cardContent}>
-              <Paragraph style={styles.text}>
-                {mostSoldProduct ? `${mostSoldProduct.name} : ${mostSoldProduct.quantity}\nImporte : $${mostSoldProduct.price * mostSoldProduct.quantity}` : ''}
-              </Paragraph>
-            </View>
-          </LinearGradient>
-          <LinearGradient colors={['#164076', '#1a5a9a', '#1e6cc7']} style={[styles.customCard, { width: '48%' }]}>
-            <View style={styles.cardTitleContainer}>
-              <Avatar.Icon icon="trending-up" size={25} style={styles.icon} color="#102341" />
-              <Text style={styles.cardTitle}>Incremento</Text>
-            </View>
-            <View style={styles.cardContent}>
-              <Paragraph style={styles.text}>
-                {salesDifference !== null ? `Balance con la semana anterior: ${salesDifference > 0 ? '+' : ''}${salesDifference}` : 'Calculando...'}
-              </Paragraph>
-            </View>
-          </LinearGradient>
+          <TouchableOpacity onPress={() => router.push('/screen/admin_ventas')} style={{ width: '48%' }}>
+            <LinearGradient colors={['#164076', '#1a5a9a', '#1e6cc7']} style={[styles.customCard, styles.fixedHeightCard]}>
+              <View style={styles.cardTitleContainer}>
+                <Avatar.Icon icon="star" size={25} style={styles.icon} color="#102341" />
+                <Text style={styles.cardTitle}>Top Ventas</Text>
+              </View>
+              <View style={styles.cardContent}>
+                {mostSoldProduct ? (
+                  <View>
+                    <Text style={styles.productName}>{mostSoldProduct.name}</Text>
+                    <Text style={styles.productQuantity}>Cantidad: {mostSoldProduct.quantity}</Text>
+                    <Text style={styles.productImporte}>Importe: ${mostSoldProduct.price * mostSoldProduct.quantity}</Text>
+                  </View>
+                ) : (
+                  <Paragraph style={styles.text}>Calculando...</Paragraph>
+                )}
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+          
+          <TouchableOpacity onPress={() => router.push('/screen/admin_product')} style={{ width: '48%' }}>
+            <LinearGradient colors={['#164076', '#1a5a9a', '#1e6cc7']} style={[styles.customCard, styles.fixedHeightCard]}>
+              <View style={styles.cardTitleContainer}>
+                <Avatar.Icon icon="trending-up" size={25} style={styles.icon} color="#102341" />
+                <Text style={styles.cardTitle}>Sin Stock</Text>
+              </View>
+              <View style={styles.cardContent}>
+                {lowStock.length > 0 ? (
+                  lowStock.slice(0, 3).map(product => (
+                    <Paragraph key={product.id} style={styles.text}>
+                      {product.name}: {product.stock}
+                    </Paragraph>
+                  ))
+                ) : (
+                  <Paragraph style={styles.text}>Calculando...</Paragraph>
+                )}
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
       </View>
       <Text style={styles.header2}>Ventas semanales</Text>
+      <SalesChart />
       <View style={styles.buttonContainer}>
         <Button mode="contained" onPress={() => router.push('/(tabs)')} style={styles.button}>
           Vender
         </Button>
-        <Button mode="contained" onPress={() => router.push('/screen/admin_product')} style={styles.button}>
+        <Button mode="contained" onPress={() => router.push('/screen/planes')} style={styles.button}>
           Productos
         </Button>
       </View>
@@ -118,6 +169,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderRadius: 8,
     marginTop: 10,
+  },
+  fixedHeightCard: {
+    height: 150, // Establecer una altura fija
   },
   transactionsContainer: {
     backgroundColor: 'transparent',
@@ -154,7 +208,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontWeight: 'bold',
     color: '#F5F5DC', // Cambiar color del texto
-    fontSize: 16,
+    fontSize: 22,
     marginLeft: 8,
   },
   cardContent: {
@@ -199,12 +253,28 @@ const styles = StyleSheet.create({
   text1: {
     fontSize: 16, // Reducir tamaño de fuente
     marginLeft: 8,
+    marginBottom: 8,
     color: '#F5F5DC', // Cambiar color del texto
   },
   icon: {
     marginRight: 0,
     backgroundColor: '#F5F5DC', // Color de fondo del icono
-  }
+  },
+  productName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: '#F5F5DC',
+  },
+  productQuantity: {
+    fontSize: 16,
+    marginBottom: 4,
+    color: '#F5F5DC',
+  },
+  productImporte: {
+    fontSize: 16,
+    color: '#F5F5DC',
+  },
 });
 
 export default SalesAndExpensesPage;
