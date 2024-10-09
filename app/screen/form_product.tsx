@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, Switch, Image, TouchableOpacity, Alert } from 'react-native';
-import { insertProduct, getProductById, updateProduct } from '../api/database';
+import { insertProduct, getProductById, updateProduct, getUserTenantId } from '../api/database';
 import { TextInput } from 'react-native-paper';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../api/supabaseConfig';
 
 const FormProduct = () => {
     const [productName, setProductName] = useState('');
@@ -18,23 +19,35 @@ const FormProduct = () => {
     const { productId } = useLocalSearchParams<{ productId: string }>();
     const router = useRouter();
     const [errors, setErrors] = useState({ name: '', price: '', stock: '' });
+    const [tenantId, setTenantId] = useState<number | null>(null);
 
     useEffect(() => {
-        if (productId && !isEditing) {
+        const fetchTenantId = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.email) {
+                const tenantId = await getUserTenantId(session.user.email);
+                setTenantId(tenantId);
+            }
+        };
+
+        fetchTenantId();
+    }, []);
+
+    useEffect(() => {
+        if (productId && !isEditing && tenantId) {
             const loadProduct = async () => {
-                const product = await getProductById(productId);
+                const product = await getProductById(productId, tenantId);
                 if (product) {
                     setProductName(product.name);
                     setProductPrice(product.price.toString());
                     setStock(product.stock.toString());
-                    setIsAvailable(product.isAvailable);
                     setImage(product.image || '');
                     setIsEditing(true);
                 }
             };
             loadProduct();
         }
-    }, [productId, isEditing]);
+    }, [productId, isEditing, tenantId]);
 
     const validate = () => {
         let valid = true;
@@ -59,22 +72,35 @@ const FormProduct = () => {
 
     const handleSaveProduct = async () => {
         if (validate()) {
+            if (tenantId === null) {
+                Alert.alert('Error', 'No se pudo obtener el tenant_id del usuario.');
+                return;
+            }
+    
+            const stockInt = parseInt(stock, 10);
+            if (isNaN(stockInt)) {
+                Alert.alert('Error', 'El valor de stock no es un número válido.');
+                return;
+            }
+    
             const productData = {
                 name: productName,
                 price: parseFloat(productPrice),
-                stock: parseInt(stock),
+                stock: stockInt,
                 isAvailable,
                 image,
+                tenant_id: tenantId,
             };
-
+            
+    
             if (isEditing && productId !== null) {
-                await updateProduct(productId, productData.name, productData.price, productData.stock, productData.isAvailable, productData.image);
+                await updateProduct(productId, productData.name, productData.price, productData.stock, productData.image, productData.tenant_id);
                 await saveImage(productData.name);
             } else {
-                const newProductId = await insertProduct(productData.name, productData.price, productData.stock, productData.isAvailable, productData.image);
+                const newProductId = await insertProduct(productData.name, productData.price, productData.stock, productData.image, productData.tenant_id);
                 await saveImage(productData.name);
             }
-            router.push('/screen/admin_product');
+            router.replace('/screen/admin_product');
         } else {
             Alert.alert('Error', 'Por favor, corrige los errores antes de guardar.');
         }
@@ -121,7 +147,6 @@ const FormProduct = () => {
                     [{ resize: { width: 267, height: 267 } }],
                     { compress: 1, format: ImageManipulator.SaveFormat.PNG }
                 );
-                console.log(manipResult.uri); // Añadir log para verificar la URI de la imagen redimensionada
                 await FileSystem.moveAsync({
                     from: manipResult.uri,
                     to: imagePath,
@@ -172,13 +197,6 @@ const FormProduct = () => {
                 keyboardType="numeric"
             />
             {errors.stock ? <Text style={styles.errorText}>{errors.stock}</Text> : null}
-            <View style={styles.switchContainer}>
-                <Text>Disponible</Text>
-                <Switch
-                    value={isAvailable}
-                    onValueChange={setIsAvailable}
-                />
-            </View>
             <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
                 <Ionicons name="image-outline" size={24} color="#fff" />
                 <Text style={styles.imagePickerText}>Seleccionar Imagen</Text>

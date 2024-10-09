@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs, Stack } from 'expo-router';
+import { Link, Tabs, Stack, router } from 'expo-router';
 import { Pressable, StatusBar } from 'react-native';
 import Colors from '@/constants/Colors';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
@@ -16,20 +16,23 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
-  //const [supabaseUser, setSupabaseUser] =
-   //useState<SupabaseUser | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
 
-  
+  useEffect(() => {
+    const { data: { subscription: supabaseSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setSupabaseUser(session?.user ?? null);
+    });
 
-    //const { data: { subscription: supabaseSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      //setSupabaseUser(session?.user ?? null);
-    //});
+    return () => {
+      supabaseSubscription?.unsubscribe();
+    };
+  }, []);
 
-  //const user =  supabaseUser;
-  
-  /*if (!user) {
-    return <UserForm />;
-  }*/
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setSupabaseUser(null);
+    router.push('/screen/login');
+  };
 
   return (
     <>
@@ -45,14 +48,25 @@ export default function TabLayout() {
           headerTintColor: Colors['light'].text,
         }}>
         <Tabs.Screen
-          name="two"
+          name="index"
           options={{
             title: 'Inicio',
             tabBarIcon: ({ color }) => (
               <TabBarIcon name={"home"} color={color} />
             ),
             headerRight: () => (
-              
+              supabaseUser ? (
+                <Pressable onPress={handleSignOut}>
+                  {({ pressed }) => (
+                    <FontAwesome
+                      name="sign-out"
+                      size={25}
+                      color={Colors['light'].text}
+                      style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
+                    />
+                  )}
+                </Pressable>
+              ) : (
                 <Link href="/modal" asChild>
                   <Pressable>
                     {({ pressed }) => (
@@ -65,12 +79,12 @@ export default function TabLayout() {
                     )}
                   </Pressable>
                 </Link>
-              
+              )
             ),
           }}
         />
         <Tabs.Screen
-          name="index"
+          name="two"
           options={{
             title: 'Vender Producto',
             tabBarIcon: ({ color }) => <TabBarIcon name="qrcode" color={color} />,

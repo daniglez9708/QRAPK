@@ -1,21 +1,24 @@
 import * as SQLite from 'expo-sqlite';
 import { startOfWeek, endOfWeek, subWeeks, format } from 'date-fns';
+import { SkRRect } from '@shopify/react-native-skia';
+
 
 export interface Product {
     id: number;
     name: string;
     price: number;
     stock: number;
-    isAvailable: boolean;
     image: string | null;
+    tenant_id: number;
 }
 
 export interface Sale {
     id: number;
     date: string;
     total: number;
-    
+    tenant_id: number;
 }
+
 export interface SaleProduct {
     id: number;
     date: string;
@@ -26,58 +29,157 @@ export interface SaleProduct {
         quantity: number;
         price: number;
     }[];
-    
 }
-
 
 const db = SQLite.openDatabaseAsync('sales.db');
 
 export const createTables = async () => {
-    (await db).execAsync(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            price REAL,
-            stock INTEGER,
-            isAvailable INTEGER,
-            image TEXT
-        );
-        CREATE TABLE IF NOT EXISTS sales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT,
-            total REAL
-        );
-        CREATE TABLE IF NOT EXISTS sales_products (
-            sale_id INTEGER,
-            product_id INTEGER,
-            quantity INTEGER,
-            FOREIGN KEY (sale_id) REFERENCES sales(id),
-            FOREIGN KEY (product_id) REFERENCES products(id)
-        );
-    `);
-}
+    const database = await db;
 
-export const insertProduct = async (name: string, price: number, stock: number, isAvailable: boolean, image: string | null) => {
-    const result = await (await db).runAsync('INSERT INTO products (name, price, stock, isAvailable, image) VALUES (?, ?, ?, ?, ?)', [name, price, stock, isAvailable ? 1 : 0, image]);
-}
+    const verifyTableCreation = async (tableName: string) => {
+        try {
+            const result = await database.getAllSync(`SELECT name FROM sqlite_master WHERE type='table' AND name=?;`, [tableName]);
+            if (result) {
+                console.log(`Tabla ${tableName} creada correctamente`);
+            } else {
+                console.error(`Error: Tabla ${tableName} no se pudo crear`);
+            }
+        } catch (error) {
+            console.error(`Error verificando la tabla ${tableName}:`, error);
+        }
+    };
 
-export const getProducts = async (): Promise<Product[]> => {
+    try {
+        await database.execAsync('PRAGMA journal_mode = WAL;');
+
+        // Crear tabla products
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                price REAL,
+                stock INTEGER,
+                image TEXT,
+                tenant_id INTEGER
+            );
+        `);
+        await verifyTableCreation('products');
+
+        // Crear tabla sales
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                total REAL,
+                tenant_id INTEGER
+            );
+        `);
+        await verifyTableCreation('sales');
+
+        // Crear tabla sales_products
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS sales_products (
+                sale_id INTEGER,
+                product_id INTEGER,
+                quantity INTEGER,
+                FOREIGN KEY (sale_id) REFERENCES sales(id),
+                FOREIGN KEY (product_id) REFERENCES products(id)
+            );
+        `);
+        await verifyTableCreation('sales_products');
+
+        // Crear tabla version
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS version (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT
+            );
+        `);
+        await verifyTableCreation('version');
+
+        // Crear tabla user
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS user (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT,
+                password TEXT,
+                tenant_id INTEGER,
+                user_role TEXT
+            );
+        `);
+        await verifyTableCreation('user');
+
+        await verifyTableCreation('user_role');
+
+        // Crear tabla plans
+        await database.execAsync(`
+            CREATE TABLE IF NOT EXISTS plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                user_id INTEGER,
+                tenant_id INTEGER,
+                price REAL,
+                start_date DATE,
+                end_date DATE,
+                FOREIGN KEY (user_id) REFERENCES user(id)
+            );
+        `);
+        await verifyTableCreation('plans');
+
+        // Insertar datos iniciales
+        /*await database.execAsync(`
+            INSERT INTO user (email, password, tenant_id) VALUES ('dgonzalez9723@gmail.com', 'Daniel123', 1);
+            INSERT INTO user_role (user_id, role) VALUES (1, 'admin');
+        `);*/
+        console.log('Datos iniciales insertados correctamente');
+    } catch (error) {
+        console.error('Error creando las tablas:', error);
+        throw error;
+    }
+}
+export const insertProduct = async (name: string, price: number, stock: number, image: string | null, tenant_id: number) => {
+    try {
+        const result = await (await db).runAsync(
+            'INSERT INTO products (name, price, stock, image, tenant_id) VALUES (?, ?, ?, ?, ?)',
+            [name, price, stock, image, tenant_id]
+        );
+        return result;
+    } catch (error) {
+        console.error('Error inserting product:', error);
+        throw error;
+    }
+};
+
+
+export const getProducts = async (tenant_id: number): Promise<Product[]> => {
+    
+    const rows = await (await db).getAllAsync('SELECT * FROM products WHERE tenant_id = ?', [tenant_id]) as any[];
+    const products: Product[] = rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        price: row.price,
+        stock: row.stock,
+        image: row.image,
+        tenant_id: row.tenant_id,
+    }));
+    return products;
+}
+export const getProductsAll = async (): Promise<Product[]> => {
+    
     const rows = await (await db).getAllAsync('SELECT * FROM products') as any[];
     const products: Product[] = rows.map(row => ({
         id: row.id,
         name: row.name,
         price: row.price,
         stock: row.stock,
-        isAvailable: row.isAvailable === 1,
         image: row.image,
-        // Mapea otros campos según tu esquema de base de datos
+        tenant_id: row.tenant_id,
     }));
     return products;
 }
 
-export const fetchProductById = async (id: number): Promise<Product | null> => {
-    const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ?', [id]) as Product | null;
+export const fetchProductById = async (id: number, tenant_id: number): Promise<Product | null> => {
+    const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ? AND tenant_id = ?', [id, tenant_id]) as Product | null;
     if (product) {
         return product;
     } else {
@@ -85,17 +187,23 @@ export const fetchProductById = async (id: number): Promise<Product | null> => {
         return null;
     }
 }
-export const insertSale = async (date: string, total: number) => {
-    const result = await (await db).runAsync('INSERT INTO sales (date, total) VALUES (?, ?)', [date, total]);
+
+export const insertSale = async (date: string, total: number, tenant_id: number) => {
+    const result = await (await db).runAsync('INSERT INTO sales (date, total, tenant_id) VALUES (?, ?, ?)', [date, total, tenant_id]);
 }
 
 export const insertSaleProduct = async (sale_id: number, product_id: number, quantity: number) => {
     const result = await (await db).runAsync('INSERT INTO sales_products (sale_id, product_id, quantity) VALUES (?, ?, ?)', [sale_id, product_id, quantity]);
 }
 
-export const addSaleWithProducts = async (date: string, total: number, products: { product_id: number, quantity: number }[]) => {
+export const addSaleWithProducts = async (date: string, total: number, tenant_id: number, products: { product_id: number, quantity: number }[]) => {
     // Insertar la venta
-    const saleResult = await (await db).runAsync('INSERT INTO sales (date, total) VALUES (?, ?)', [date, total]);
+    console.log(date, total, tenant_id);
+    console.log(getTableInfo('sales'));
+    
+    
+    const saleResult = await (await db).runAsync('INSERT INTO sales (date, total, tenant_id) VALUES (?, ?, ?)', [date, total, tenant_id]);
+    console.log(saleResult);
     
     // Obtener el ID de la venta recién insertada
     const saleId = saleResult.lastInsertRowId;
@@ -106,16 +214,19 @@ export const addSaleWithProducts = async (date: string, total: number, products:
         await (await db).runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [product.quantity, product.product_id]);
     }
 }
-export const getSales = async (): Promise<Sale[]> => {
-    const rows = await (await db).getAllAsync('SELECT * FROM sales') as any[];
+
+export const getSales = async (tenant_id: number): Promise<Sale[]> => {
+    const rows = await (await db).getAllAsync('SELECT * FROM sales WHERE tenant_id = ?', [tenant_id]) as any[];
     const sales: Sale[] = rows.map(row => ({
         id: row.id,
         date: row.date,
         total: row.total,
+        tenant_id: row.tenant_id,
     }));
     return sales;
 }
-export const getSalesWithProducts = async (): Promise<SaleProduct[]> => {
+
+export const getSalesWithProducts = async (tenant_id: number): Promise<SaleProduct[]> => {
     const database = await db;
     try {
         const rows = await database.getAllAsync(`
@@ -130,7 +241,8 @@ export const getSalesWithProducts = async (): Promise<SaleProduct[]> => {
             FROM sales s
             JOIN sales_products sp ON s.id = sp.sale_id
             JOIN products p ON sp.product_id = p.id
-        `) as any[];
+            WHERE s.tenant_id = ?
+        `, [tenant_id]) as any[];
 
         const salesMap: { [key: number]: SaleProduct } = {};
 
@@ -157,6 +269,7 @@ export const getSalesWithProducts = async (): Promise<SaleProduct[]> => {
         throw error;
     }
 };
+
 export const getTableInfo = async (tableName: string) => {
     const database = await db;
     try {
@@ -168,30 +281,31 @@ export const getTableInfo = async (tableName: string) => {
         throw error;
     }
 }
-export  const deleteTable = async() =>{
+
+export const deleteTable = async() =>{
     const database = await db;
     try {
-        const result = await database.runAsync('DROP TABLE IF EXISTS sales_products');
-        const result1 = await database.runAsync('DROP TABLE IF EXISTS sales');
-        const result2 = await database.runAsync('DROP TABLE IF EXISTS products');
+        const result = await database.runAsync('DROP TABLE IF EXISTS user');
+        //const result1 = await database.runAsync('DROP TABLE IF EXISTS sales');
+        //const result2 = await database.runAsync('DROP TABLE IF EXISTS products');
         return result;
     } catch (error) {
         console.error('Error al eliminar la tabla:', error);
         throw error;
     }
 }
-export const logSalesDates = async () => {
+
+export const logSalesDates = async (tenant_id: number) => {
     const database = await db;
     try {
-        const results: any[] = await database.getAllAsync('SELECT date FROM sales LIMIT 5');
-        console.log('Fechas de ventas:', results);
+        const results: any[] = await database.getAllAsync('SELECT date FROM sales WHERE tenant_id = ? LIMIT 5', [tenant_id]);
     } catch (error) {
         console.error('Error al obtener las fechas de ventas:', error);
         throw error;
     }
 }
 
-export const sumDailySalesTotal = async (): Promise<{ totalSum: number, totalProductsSold: number }> => {
+export const sumDailySalesTotal = async (tenant_id: number): Promise<{ totalSum: number, totalProductsSold: number }> => {
     const database = await db;
     try {
         const today = new Date().toISOString().split('T')[0]; // Obtener la fecha actual en formato YYYY-MM-DD
@@ -204,8 +318,8 @@ export const sumDailySalesTotal = async (): Promise<{ totalSum: number, totalPro
             JOIN 
                 sales_products sp ON s.id = sp.sale_id
             WHERE 
-                DATE(s.date) = DATE(?)
-        `, [today]);
+                DATE(s.date) = DATE(?) AND s.tenant_id = ?
+        `, [today, tenant_id]);
         return {
             totalSum: result.totalSum,
             totalProductsSold: result.totalProductsSold
@@ -215,17 +329,20 @@ export const sumDailySalesTotal = async (): Promise<{ totalSum: number, totalPro
         throw error;
     }
 }
-export const getMostSoldProduct = async (): Promise<{ name: string, quantity: number, price: number } | null> => {
+
+export const getMostSoldProduct = async (tenant_id: number): Promise<{ name: string, quantity: number, price: number } | null> => {
     const database = await db;
     try {
         const result: any = await database.getFirstAsync(`
             SELECT p.name, SUM(sp.quantity) as totalQuantity, p.price
             FROM sales_products sp
             JOIN products p ON sp.product_id = p.id
+            JOIN sales s ON sp.sale_id = s.id
+            WHERE s.tenant_id = ?
             GROUP BY sp.product_id, p.price
             ORDER BY totalQuantity DESC
             LIMIT 1
-        `);
+        `, [tenant_id]);
         
         return result ? { name: result.name, quantity: result.totalQuantity, price: result.price } : null;
     } catch (error) {
@@ -233,16 +350,22 @@ export const getMostSoldProduct = async (): Promise<{ name: string, quantity: nu
         throw error;
     }
 }
-export const getProductById = async (id: string): Promise<Product | null> => {
-    const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ?', [id]) as Product | null;
+
+export const getProductById = async (id: string, tenant_id: number): Promise<Product | null> => {
+    const product = await (await db).getFirstAsync('SELECT * FROM products WHERE id = ? AND tenant_id = ?', [id, tenant_id]) as Product | null;
+    
     return product;
 }
-export const updateProduct = async (id: string, name: string, price: number, stock: number, isAvailable: boolean, image: string | null) => {
-    await (await db).runAsync('UPDATE products SET name = ?, price = ?, stock = ?, isAvailable = ?, image = ? WHERE id = ?', [name, price, stock, isAvailable ? 1 : 0, image, id]);
+
+export const updateProduct = async (id: string, name: string, price: number, stock: number, image: string | null, tenant_id: number) => {
+    try {
+        await (await db).runAsync('UPDATE products SET name = ?, price = ?, stock = ?, image = ? WHERE id = ? AND tenant_id = ?', [name, price, stock, image, id, tenant_id]);
+    } catch (error) {
+        console.error('Error actualizando el producto:', error);
+        throw error;
+    }
 }
-
-
-export const getTotalSalesByCurrentWeek = async (): Promise<{ date: string, total: number }[]> => {
+export const getTotalSalesByCurrentWeek = async (tenant_id: number): Promise<{ date: string, total: number }[]> => {
     const database = await db;
     const today = new Date();
     const startOfWeekDate = startOfWeek(today, { weekStartsOn: 1 }); // La semana empieza el lunes
@@ -253,10 +376,10 @@ export const getTotalSalesByCurrentWeek = async (): Promise<{ date: string, tota
         const rows = await database.getAllAsync(`
             SELECT strftime('%Y-%m-%d', date) as date, SUM(total) as total
             FROM sales
-            WHERE date(date) BETWEEN date(?) AND date(?)
+            WHERE date(date) BETWEEN date(?) AND date(?) AND tenant_id = ?
             GROUP BY strftime('%Y-%m-%d', date)
             ORDER BY date
-        `, [formattedStartOfWeekDate, formattedTodayDate]) as any[];
+        `, [formattedStartOfWeekDate, formattedTodayDate, tenant_id]) as any[];
 
         // Mapea los resultados de la consulta a un formato más manejable
         const totalSalesByCurrentWeek = rows.map(row => ({
@@ -269,9 +392,9 @@ export const getTotalSalesByCurrentWeek = async (): Promise<{ date: string, tota
         console.error('Error al obtener el total de ventas de la semana actual:', error);
         throw error;
     }
-};
+}
 
-export const getTotalSalesByWeek = async (date: Date): Promise<number> => {
+export const getTotalSalesByWeek = async (date: Date, tenant_id: number): Promise<number> => {
     const database = await db;
     const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 }); // La semana empieza el lunes
     const endOfWeekDate = endOfWeek(date, { weekStartsOn: 1 });
@@ -282,22 +405,23 @@ export const getTotalSalesByWeek = async (date: Date): Promise<number> => {
         const result: any = await database.getFirstAsync(`
             SELECT SUM(total) as totalSum
             FROM sales
-            WHERE date BETWEEN ? AND ?
-        `, [formattedStartOfWeekDate, formattedEndOfWeekDate]);
+            WHERE date BETWEEN ? AND ? AND tenant_id = ?
+        `, [formattedStartOfWeekDate, formattedEndOfWeekDate, tenant_id]);
 
         return result.totalSum || 0;
     } catch (error) {
         console.error('Error al obtener el total de ventas de la semana:', error);
         throw error;
     }
-};
-export const getSalesDifferenceWithPreviousWeek = async (): Promise<number> => {
+}
+
+export const getSalesDifferenceWithPreviousWeek = async (tenant_id: number): Promise<number> => {
     const today = new Date();
     const previousWeekDate = subWeeks(today, 1);
 
     try {
-        const currentWeekSales = await getTotalSalesByWeek(today);
-        const previousWeekSales = await getTotalSalesByWeek(previousWeekDate);
+        const currentWeekSales = await getTotalSalesByWeek(today, tenant_id);
+        const previousWeekSales = await getTotalSalesByWeek(previousWeekDate, tenant_id);
 
         const difference = currentWeekSales - previousWeekSales;
         return difference;
@@ -305,15 +429,17 @@ export const getSalesDifferenceWithPreviousWeek = async (): Promise<number> => {
         console.error('Error al calcular la diferencia de ventas con la semana anterior:', error);
         throw error;
     }
-};
-export const deleteProduct = async () => {
-    await (await db).runAsync('DELETE FROM products WHERE id = 9');
 }
-export const getLowStockProducts = async (): Promise<Product[]> => {
+
+export const deleteProduct = async (id: number, tenant_id: number) => {
+    await (await db).runAsync('DELETE FROM products WHERE id = ? AND tenant_id = ?', [id, tenant_id]);
+}
+
+export const getLowStockProducts = async (tenant_id: number): Promise<Product[]> => {
     const database = await db;
     const threshold = 20; // Umbral de stock bajo
     try {
-        const rows = await database.getAllAsync('SELECT * FROM products WHERE stock < ? ORDER BY stock ASC', [threshold]) as any[];
+        const rows = await database.getAllAsync('SELECT * FROM products WHERE stock < ? AND tenant_id = ? ORDER BY stock ASC', [threshold, tenant_id]) as any[];
         const lowStockProducts: Product[] = rows.map(row => ({
             id: row.id,
             name: row.name,
@@ -321,10 +447,59 @@ export const getLowStockProducts = async (): Promise<Product[]> => {
             stock: row.stock,
             isAvailable: row.isAvailable === 1,
             image: row.image,
+            tenant_id: row.tenant_id,
         }));
         return lowStockProducts;
     } catch (error) {
         console.error('Error al obtener los productos con poco stock:', error);
         throw error;
     }
-};
+}
+export const getUserTenantId = async (email: string): Promise<number | null> => {
+    const database = await db;
+    try {
+      const result: any = await database.getFirstAsync('SELECT tenant_id FROM user WHERE email = ?', [email]);
+      return result ? result.tenant_id : null;
+    } catch (error) {
+      console.error('Error al obtener el tenant_id del usuario:', error);
+      throw error;
+    }
+  };
+  export const addUsers = async (email: string, password: string, user_role: string , tenant_id:number) => {
+    try {
+        console.log('Intentando insertar usuario con los siguientes datos:');
+        console.log(`Email: ${email}`);
+        console.log(`Password: ${password}`);
+        console.log(`User Role: ${user_role}`);
+        console.log(`Tenant: ${tenant_id}`);
+
+        const result = await (await db).runAsync('INSERT INTO user (email, password, user_role, tenant_id) VALUES (?, ?, ?, ?)', [email, password, user_role, tenant_id]);
+        
+        console.log('Usuario insertado exitosamente:', result);
+        return result;
+    } catch (error) {
+        console.error('Error al insertar el usuario:', error);
+        console.error('Detalles del error:', (error as Error).message);
+        throw error;
+    }
+}
+export const getUser = async () => {
+    try {
+        const result = await (await db).getAllAsync('SELECT * FROM user');
+        console.log(result);
+        
+        return result;
+    } catch (error) {
+        console.error('Error al obtener el usuario:', error);
+        throw error;
+    }
+}
+export const deleteNonAdminUsers = async () => {
+    try {
+        const result = await (await db).runAsync('DELETE FROM user');
+        return result;
+    } catch (error) {
+        console.error('Error al eliminar los usuarios no administradores:', error);
+        throw error;
+    }
+}

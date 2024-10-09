@@ -43,18 +43,32 @@ export default function App() {
     );
   }
 
-  const handleBarcodeScanned = ({ data }: { data: string }) => {
+  const handleBarcodeScanned = async ({ data }: { data: string }) => {
     if (!isScanned) {
       setIsScanned(true);
       try {
         const parsedData = JSON.parse(data); // Parsear los datos escaneados
         setScannedData(data);
-  
-        // Navegar a la otra vista con los datos escaneados
-        router.push({
-          pathname: '/screen/test',
-          params: { scannedData: JSON.stringify(parsedData) } // Enviar los datos parseados como cadena JSON
-        });
+
+        if (parsedData.link === 'tenant') {
+          // Manejar el tenant_id
+          const tenantId = parsedData.tenant_id;
+          await AsyncStorage.setItem('tenantId', tenantId);
+
+          // Navegar a la vista de vinculación de empleados
+          /*router.push({
+            pathname: '/screen/employeeLink',
+            params: { tenantId }
+          });*/
+        } if (parsedData.id) {
+          // Manejar el producto
+          router.push({
+            pathname: '/screen/test',
+            params: { scannedData: JSON.stringify(parsedData) } // Enviar los datos del producto como cadena JSON
+          });
+        } else {
+          console.error('Tipo de QR desconocido:', parsedData);
+        }
       } catch (error) {
         console.error('Error parsing QR data:', error);
       }
@@ -65,12 +79,15 @@ export default function App() {
     setIsScanned(false);
     setScannedData(null);
   };
+  const handleNavigateToTest = () => {
+    router.push('/screen/test');
+  };
 
   return (
     <SafeAreaView style={StyleSheet.absoluteFillObject}>
       <Stack.Screen
         options={{
-          title: "OverView",
+          title: "Vender Producto",
           headerShown: false
         }}
       />
@@ -90,6 +107,9 @@ export default function App() {
         </View>
       )}
       <Overlay />
+      <TouchableOpacity style={styles.navigateButton} onPress={handleNavigateToTest}>
+        <Text style={styles.buttonText}>Ir al carrito</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -103,6 +123,16 @@ const styles = StyleSheet.create({
   permissionText: {
     fontSize: 16,
     marginBottom: 20,
+  },
+  navigateButton: {
+    position: 'absolute',
+    bottom: 20,
+    left: '50%',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    transform: [{ translateX: -50 }],
+    backgroundColor: '#183762',
+    borderRadius: 5,
   },
   scannedText: {
     color: 'black',

@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, TouchableWithoutFeedback, Keyboard, TouchableOpacity } from 'react-native';
-import { IconButton } from 'react-native-paper';
+import { IconButton, List } from 'react-native-paper';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { getSalesWithProducts, createTables } from '../api/database';
+import { getSalesWithProducts, createTables, getUserTenantId } from '../api/database';
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import ReusableTable from '@/components/ReusableTable'; // Ajusta la ruta según tu estructura de proyecto
 import { useRouter } from 'expo-router';
+import { supabase } from '../api/supabaseConfig';
+import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 
 interface Product {
     name: string;
@@ -29,24 +31,46 @@ const SalesList: React.FC = () => {
     const [filteredSales, setFilteredSales] = useState<SaleProduct[]>([]);
     const [isDatePickerVisible, setDatePickerVisibility] = useState<boolean>(false);
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+    const [tenantId, setTenantId] = useState<number | null>(null);
     const router = useRouter();
+    const theme = {
+        ...DefaultTheme,
+        colors: {
+            ...DefaultTheme.colors,
+            primary: '#183762', // Cambia este color al que prefieras
+        },
+    };
 
     useEffect(() => {
-        createTables();
-        const fetchSales = async () => {
+        const fetchTenantIdAndSales = async () => {
             try {
-                const salesData = await getSalesWithProducts();
-                setSales(salesData);
-                setFilteredSales(salesData);
-            } catch (err) {
-                setError('Error fetching sales data');
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    router.replace('/screen/login');
+                    return;
+                }
+                if (session?.user?.email) {
+                    const tenantId = await getUserTenantId(session.user.email);
+                    if (tenantId) {
+                        setTenantId(tenantId);
+                        const salesData = await getSalesWithProducts(tenantId);
+                        setSales(salesData);
+                        setFilteredSales(salesData);
+                    } else {
+                        router.replace('/screen/login');
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching tenant ID or sales data:', error);
+                setError('Error fetching tenant ID or sales data');
+                router.replace('/screen/login');
             } finally {
                 setLoading(false);
             }
         };
 
-        fetchSales();
-    }, []);
+        fetchTenantIdAndSales();
+    }, [router]);
 
     useEffect(() => {
         if (selectedDate) {
@@ -102,6 +126,13 @@ const SalesList: React.FC = () => {
         setSelectedDate(null);
     };
 
+    const handleRowPress = (sale: SaleProduct) => {
+        router.push({
+            pathname: '/screen/venta_detalles',
+            params: { sale: JSON.stringify(sale) },
+        });
+    };
+
     if (loading) {
         return <ActivityIndicator size="large" color="#0000ff" />;
     }
@@ -110,31 +141,23 @@ const SalesList: React.FC = () => {
         return <Text style={styles.error}>{error}</Text>;
     }
 
+    const groupedSales = filteredSales.reduce((groups, sale) => {
+        const date = new Date(sale.date).toLocaleDateString('en-CA'); // Formato YYYY-MM-DD
+        if (!groups[date]) {
+            groups[date] = [];
+        }
+        groups[date].push(sale);
+        return groups;
+    }, {} as { [key: string]: SaleProduct[] });
+
     const columns = [
         { title: 'Venta ID', key: 'id', width: 100 },
         { title: 'Fecha', key: 'date', width: 150 },
         { title: 'Total', key: 'total', numeric: true, width: 100 },
     ];
 
-    const data = filteredSales.map(sale => ({
-        id: sale.id,
-        date: new Date(sale.date).toLocaleDateString('en-CA'), // Formato YYYY-MM-DD
-        total: `$${sale.total.toFixed(2)}`,
-        products: sale.products.map(product => ({
-            name: product.name,
-            quantity: product.quantity,
-            price: product.price,
-        })),
-    }));
-
-    const handleRowPress = (sale: SaleProduct) => {
-        router.push({
-            pathname: '/screen/venta_detalles',
-            params: { sale: JSON.stringify(sale) },
-        });
-    };
-
     return (
+        <PaperProvider theme={theme}>
         <TouchableWithoutFeedback onPress={() => { setDatePickerVisibility(false); Keyboard.dismiss(); }}>
             <View style={styles.container}>
                 <View style={styles.header}>
@@ -155,11 +178,32 @@ const SalesList: React.FC = () => {
                         </TouchableOpacity>
                     </View>
                 </View>
-                <ReusableTable
-                    columns={columns}
-                    data={data}
-                    onRowPress={handleRowPress}
-                />
+                {Object.keys(groupedSales).length === 0 ? (
+                    <Text style={styles.noSalesText}>No hay ventas disponibles.</Text>
+                ) : (
+                    Object.keys(groupedSales).map(date => (
+                        <List.Accordion
+                            key={date}
+                            title={date}
+                            left={props => <List.Icon {...props} icon="calendar" />}
+                        >
+                            <ReusableTable
+                                columns={columns}
+                                data={groupedSales[date].map(sale => ({
+                                    id: sale.id,
+                                    date: new Date(sale.date).toLocaleDateString('en-CA'), // Formato YYYY-MM-DD
+                                    total: `$${sale.total.toFixed(2)}`,
+                                    products: sale.products.map(product => ({
+                                        name: product.name,
+                                        quantity: product.quantity,
+                                        price: product.price,
+                                    })),
+                                }))}
+                                onRowPress={handleRowPress}
+                            />
+                        </List.Accordion>
+                    ))
+                )}
                 {isDatePickerVisible && (
                     <DateTimePicker
                         value={selectedDate || new Date()}
@@ -168,10 +212,13 @@ const SalesList: React.FC = () => {
                         onChange={handleConfirm}
                         maximumDate={new Date(2030, 10, 20)}
                         minimumDate={new Date(1950, 0, 1)}
+                        textColor="#164076" // Cambia este color al que prefieras
+                        accentColor="#164076" // Cambia este color al que prefieras
                     />
                 )}
             </View>
         </TouchableWithoutFeedback>
+        </PaperProvider>
     );
 };
 
@@ -185,7 +232,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: '#2878cf',
+        backgroundColor: '#164076',
         padding: 10,
         borderRadius: 5,
         marginBottom: 16,
@@ -212,6 +259,11 @@ const styles = StyleSheet.create({
     error: {
         color: 'red',
         fontSize: 16,
+    },
+    noSalesText: {
+        fontSize: 18,
+        textAlign: 'center',
+        marginTop: 20,
     },
 });
 

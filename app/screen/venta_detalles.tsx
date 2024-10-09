@@ -23,7 +23,6 @@ const SaleDetails: React.FC = () => {
 
     try {
         sale = JSON.parse(saleString);
-        console.log('Parsed sale:', sale);
 
         // Verificar que sale.total sea un número
         if (sale) {

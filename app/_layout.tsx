@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { StatusBar } from 'react-native';
 import 'react-native-reanimated';
 import Colors from '@/constants/Colors';
+import React from 'react';
 
 //import { useColorScheme } from '@/components/useColorScheme';
 
@@ -17,7 +18,7 @@ export {
 
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)/two',
+  initialRouteName: '(tabs)',
 };
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -50,15 +51,16 @@ export default function RootLayout() {
         }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Inicio de Sesion' }} />
-        <Stack.Screen name="screen/admin_product" options={{ title: 'Admin Product' }} />
+        <Stack.Screen name="screen/admin_product" options={{ title: 'Admin Productos' }} />
         <Stack.Screen name="screen/SignUp" options={{ title: 'Registrarse' }} />
         <Stack.Screen name="screen/admin_ventas" options={{ title: 'Admin Ventas' }} />
-        <Stack.Screen name="screen/form_product" options={{ title: 'Form Product' }} />
-        <Stack.Screen name="screen/home" options={{ title: 'Home' }} />
+        <Stack.Screen name="screen/form_product" options={{ title: 'Form Producto' }} />
         <Stack.Screen name="screen/reporte_ventas" options={{ title: 'Reporte Ventas' }} />
-        <Stack.Screen name="screen/test" options={{ title: 'Test' }} />
+        <Stack.Screen name="screen/test" options={{ title: 'Carrito de venta' }} />
         <Stack.Screen name="screen/venta_detalles" options={{ title: 'Venta Detalles' }} />
-        <Stack.Screen name="screen/login" options={{ title: 'Iniciar Sesion' }} />
+        <Stack.Screen name="screen/login" options={{ title: 'Iniciar Sesion',headerShown: false }} />
+        <Stack.Screen name="screen/planes" options={{ title: 'Planes',headerShown: false }} />
+        <Stack.Screen name="screen/product_detail" options={{ title: 'Detalles del producto' }} />
       </Stack>
     </>
   );

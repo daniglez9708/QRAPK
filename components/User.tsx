@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Button, TextInput, Checkbox, Card, Title, Paragraph, ActivityIndicator, Text } from 'react-native-paper';
+import { Button, TextInput, Checkbox, Card, Title, Paragraph, Dialog, Text } from 'react-native-paper';
 import { supabase } from '../app/api/supabaseConfig';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { useRouter } from 'expo-router';
+import { createTables, deleteTable, getUserTenantId } from '@/app/api/database';
+import { LinearGradient } from 'expo-linear-gradient'; // Importar LinearGradient
 
 export default function User() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -11,32 +13,42 @@ export default function User() {
   const [password, setPassword] = useState<string>('');
   const [remember, setRemember] = useState<boolean>(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [tenantId, setTenantId] = useState<number | null>(null); // Estado para el tenant_id
+  const [errorDialogVisible, setErrorDialogVisible] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const router = useRouter();
+  const [passwordVisible, setPasswordVisible] = useState<boolean>(false);
+  const [emailError, setEmailError] = useState<string>('');
+
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setEmailError('Por favor, introduzca un correo válido.');
+    } else {
+      setEmailError('');
+    }
+  };
 
   useEffect(() => {
     const getSession = async () => {
-      console.log("Obteniendo sesión actual...");
       const { data: { session } } = await supabase.auth.getSession();
+      
       setUser(session?.user ?? null);
-      console.log("Sesión obtenida:", session);
     };
-
+    //createTables();
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log("Cambio en el estado de autenticación:", _event, session);
       setUser(session?.user ?? null);
     });
 
     return () => {
       subscription.unsubscribe();
-      console.log("Suscripción de autenticación cancelada");
     };
   }, []);
 
   async function onSubmit() {
     setIsLoading(true);
-    console.log("Iniciando sesión con:", email, password);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
@@ -46,17 +58,17 @@ export default function User() {
       // Guarda el usuario en el estado
       const user = data.user;
       setUser(user);
-      console.log("Usuario autenticado:", user);
-
-      // Navegar a la pantalla principal después del inicio de sesión exitoso
-      console.log("Navegando a /tabs/two");
-      router.push('/(tabs)/two');
+      /*if (user.email) {
+        const tenant_id = await getUserTenantId(user.email);
+        setTenantId(tenant_id);
+      }*/
+      router.push('/(tabs)');
     } catch (error) {
       console.error("Error de inicio de sesión:", error); // Log del error
-      alert('Login failed. Please check your credentials.'); // Mensaje de error para el usuario
+      setErrorMessage('Contrasena incorrecta, intente de nuevo.'); // Mensaje de error para el usuario
+      setErrorDialogVisible(true); // Mostrar el diálogo de error
     } finally {
       setIsLoading(false);
-      console.log("Finalmente"); // Este log debería ejecutarse siempre
       // Asegúrate de que se ejecute para eliminar el estado de carga
     }
   }
@@ -65,7 +77,6 @@ export default function User() {
     try {
       await supabase.auth.signOut();
       setUser(null);
-      console.log("Usuario desconectado");
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
       alert('Logout failed. Please try again.');
@@ -73,18 +84,8 @@ export default function User() {
   }
 
   return (
-    <View style={styles.container}>
-      {user ? (
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title style={styles.text}>Bienvenido, {user.email}</Title>
-            <Paragraph style={styles.text}>You are logged in.</Paragraph>
-            <Button mode="contained" onPress={handleLogout} style={styles.button}>
-              <Text style={styles.buttonText}>Logout</Text>
-            </Button>
-          </Card.Content>
-        </Card>
-      ) : (
+    <LinearGradient colors={['#164076', '#1a5a9a', '#4a90e2']} style={styles.gradient}>
+      <View style={styles.container}>
         <Card style={styles.card}>
           <Card.Content>
             <Title style={styles.title}>Iniciar sesión</Title>
@@ -92,22 +93,33 @@ export default function User() {
             <TextInput
               label="Correo"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(text) => {
+                setEmail(text);
+                validateEmail(text);
+              }}
               mode="outlined"
               style={styles.input}
               placeholder="m@example.com"
               outlineColor="#183762"
               activeOutlineColor="#183762"
+              error={!!emailError}
             />
+            {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
             <TextInput
               label="Contraseña"
               value={password}
               onChangeText={setPassword}
               mode="outlined"
-              secureTextEntry
+              secureTextEntry={!passwordVisible}
               style={styles.input}
               outlineColor="#183762"
               activeOutlineColor="#183762"
+              right={
+                <TextInput.Icon
+                  icon={passwordVisible ? "eye-off" : "eye"}
+                  onPress={() => setPasswordVisible(!passwordVisible)}
+                />
+              }
             />
             <View style={styles.checkboxContainer}>
               <Checkbox
@@ -119,7 +131,13 @@ export default function User() {
             </View>
           </Card.Content>
           <Card.Actions style={styles.actions}>
-            <Button mode="contained" onPress={onSubmit} disabled={isLoading} buttonColor="#183762" style={styles.button}>
+            <Button
+              mode="contained"
+              onPress={onSubmit}
+              disabled={isLoading || !email || !password || !!emailError}
+              buttonColor="#183762"
+              style={styles.button}
+            >
               <Text style={styles.buttonText}>{isLoading ? 'Cargando...' : 'Iniciar sesión'}</Text>
             </Button>
             <Text style={styles.link} onPress={() => {}}>Olvide mi contraseña?</Text>
@@ -128,21 +146,35 @@ export default function User() {
             </Text>
           </Card.Actions>
         </Card>
-      )}
-    </View>
+        <Dialog visible={errorDialogVisible} onDismiss={() => setErrorDialogVisible(false)} style={styles.dialog}>
+          <Dialog.Title style={styles.dialogTitle}>Error</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogText}>{errorMessage}</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setErrorDialogVisible(false)} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="close">
+              OK
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#fff',
   },
   card: {
     width: 350,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Fondo semi-transparente para que el gradiente sea visible
   },
   title: {
     fontSize: 24,
@@ -201,5 +233,25 @@ const styles = StyleSheet.create({
   },
   text: {
     color: '#183762',
+  },
+  dialog: {
+    backgroundColor: 'white',
+  },
+  dialogTitle: {
+    color: '#183762',
+  },
+  dialogText: {
+    color: '#183762',
+  },
+  dialogButton: {
+    backgroundColor: '#183762',
+    marginHorizontal: 8,
+  },
+  dialogButtonText: {
+    color: 'white',
+  },
+  errorText: {
+    color: 'red',
+    marginBottom: 16,
   },
 });

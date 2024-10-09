@@ -2,29 +2,74 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Button, TextInput, Checkbox, Card, Title, Paragraph, ActivityIndicator, RadioButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { supabase } from '../api/supabaseConfig';
+import { addUsers } from '../api/database';
+import * as Crypto from 'expo-crypto';
 
 export default function SignUpForm() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
+  const [name, setName] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [agreeTerms, setAgreeTerms] = useState<boolean>(false);
-  const [role, setRole] = useState<string>('employee'); // Default to 'employee'
+  const [role, setRole] = useState<string>('dueno'); // Default to 'employee'
+  const [emailError, setEmailError] = useState<string>('');
+  const [nameError, setNameError] = useState<string>('');
+  const [passwordError, setPasswordError] = useState<string>('');
+  const [passwordVisible, setPasswordVisible] = useState<boolean>(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState<boolean>(false);
   const router = useRouter();
 
-  async function onSubmit() {
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setEmailError('Por favor, introduzca un correo válido.');
+    } else {
+      setEmailError('');
+    }
+  };
+  const validateName = (name: string) => {
+    if (name.length < 2) {
+      setNameError('Por favor, introduzca un nombre válido.');
+    } else {
+      setNameError('');
+    }
+  }
+  const generateTenantId = async (email: string): Promise<number> => {
+    const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, email);
+    // Convertir los primeros 8 caracteres del hash en un número
+    const tenantId = parseInt(hash.substring(0, 8), 16);
+    return tenantId;
+  };
+
+  const validatePasswords = (password: string, confirmPassword: string) => {
     if (password !== confirmPassword) {
-      alert('Passwords do not match.');
+      setPasswordError('Las contraseñas no coinciden.');
+    } else {
+      setPasswordError('');
+    }
+  };
+
+  async function onSubmit() {
+    validatePasswords(password, confirmPassword);
+    if (passwordError) {
       return;
     }
 
     setIsLoading(true);
     try {
-      // Aquí deberías agregar la lógica para registrar al usuario en tu base de datos
-      // incluyendo el campo `role` para determinar si es dueño o empleado.
-      // Ejemplo:
-      // await supabase.auth.signUp({ email, password, data: { role } });
-
+      //const user_register = await supabase.auth.signUp({ email, password });
+      //if (user_register.error) throw user_register.error;
+      //const hashedPassword = await bcrypt.hash(password, 10);
+      if (role === 'empleado') {
+        await addUsers(email, password, role, 0);
+        return;
+      }
+      generateTenantId(email).then(async (tenantId) => {
+        console.log(`role ${role}`);
+        await addUsers(email, password, role, tenantId);
+      });
       // Navegar a la pantalla principal después del registro exitoso
       router.push('/(tabs)');
     } catch (error) {
@@ -46,44 +91,83 @@ export default function SignUpForm() {
           <Title style={styles.title}>Crear Cuenta</Title>
           <Paragraph style={styles.paragrap}>Complete los datos para crear una nueva cuenta</Paragraph>
           <TextInput
+            label="Nombre y Apellido"
+            value={name}
+            onChangeText={(text) => {
+              setName(text);
+              validateName(text);
+            }}
+            mode="outlined"
+            style={styles.input}
+            placeholder="Nombre"
+            outlineColor="#183762"
+            activeOutlineColor="#183762"
+            error={!!nameError}
+          />
+          <TextInput
             label="Correo"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              validateEmail(text);
+            }}
             mode="outlined"
             style={styles.input}
             placeholder="m@example.com"
             outlineColor="#183762"
             activeOutlineColor="#183762"
+            error={!!emailError}
           />
+          {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
           <TextInput
             label="Contraseña"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              validatePasswords(text, confirmPassword);
+            }}
             mode="outlined"
-            secureTextEntry
+            secureTextEntry={!passwordVisible}
             style={styles.input}
             outlineColor="#183762"
             activeOutlineColor="#183762"
+            right={
+              <TextInput.Icon
+                icon={passwordVisible ? "eye-off" : "eye"}
+                onPress={() => setPasswordVisible(!passwordVisible)}
+              />
+            }
           />
           <TextInput
             label="Confirmar Contraseña"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
+            onChangeText={(text) => {
+              setConfirmPassword(text);
+              validatePasswords(password, text);
+            }}
             mode="outlined"
-            secureTextEntry
+            secureTextEntry={!confirmPasswordVisible}
             style={styles.input}
             outlineColor="#183762"
             activeOutlineColor="#183762"
+            error={!!passwordError}
+            right={
+              <TextInput.Icon
+                icon={confirmPasswordVisible ? "eye-off" : "eye"}
+                onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
+              />
+            }
           />
+          {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
           <Text style={styles.roleLabel}>Usted es:</Text>
           <RadioButton.Group onValueChange={value => setRole(value)} value={role}>
             <View style={styles.radioButtonRow}>
               <View style={styles.radioButtonContainer}>
-                <RadioButton value="owner" color='#183762' />
+                <RadioButton value="dueno" color='#183762' />
                 <Text style={styles.radioButtonLabel}>Dueño</Text>
               </View>
               <View style={styles.radioButtonContainer}>
-                <RadioButton value="employee" color='#183762' />
+                <RadioButton value="empleado" color='#183762' />
                 <Text style={styles.radioButtonLabel}>Empleado</Text>
               </View>
             </View>
@@ -101,7 +185,7 @@ export default function SignUpForm() {
           <Button
             mode="contained"
             onPress={onSubmit}
-            disabled={isLoading || !email || !password || !agreeTerms}
+            disabled={isLoading || !email || !password || !agreeTerms || !!emailError || !!passwordError}
             buttonColor="#183762"
             style={styles.button}
           >
@@ -189,5 +273,9 @@ const styles = StyleSheet.create({
   roleLabel: {
     marginBottom: 8,
     color: '#183762',
+  },
+  errorText: {
+    color: 'red',
+    marginBottom: 16,
   },
 });

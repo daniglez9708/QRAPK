@@ -3,13 +3,17 @@ import { View, Dimensions, StyleSheet } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { getTotalSalesByCurrentWeek } from '../app/api/database';
 
-export default function SalesChart() {
+interface SalesChartProps {
+  tenantId: number;
+}
+
+const SalesChart: React.FC<SalesChartProps> = ({ tenantId }) => {
   const [salesData, setSalesData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
   const [labels, setLabels] = useState<string[]>(["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]);
 
-  const fetchTotalSalesByCurrentWeek = async () => {
+  const fetchTotalSalesByCurrentWeek = async (tenantId: number) => {
     try {
-      const totalSalesByCurrentWeek = await getTotalSalesByCurrentWeek();
+      const totalSalesByCurrentWeek = await getTotalSalesByCurrentWeek(tenantId);
       const sales = [0, 0, 0, 0, 0, 0, 0]; // Inicializa las ventas en cero para cada día de la semana
 
       const dayMap = [6, 0, 1, 2, 3, 4, 5]; // Mapea los días de la semana: Domingo -> 6, Lunes -> 0, ..., Sábado -> 5
@@ -27,8 +31,8 @@ export default function SalesChart() {
   };
 
   useEffect(() => {
-    fetchTotalSalesByCurrentWeek();
-  }, []);
+    fetchTotalSalesByCurrentWeek(tenantId);
+  }, [tenantId]);
 
   return (
     <View style={styles.container}>
@@ -86,3 +90,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+
+export default SalesChart;

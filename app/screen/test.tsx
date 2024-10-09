@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
 import { IconButton, Card, Divider, Dialog, Portal, Button, PaperProvider, Snackbar } from 'react-native-paper';
-import { fetchProductById, addSaleWithProducts, deleteTable, getTableInfo, createTables } from '../api/database';
+import { fetchProductById, addSaleWithProducts, deleteTable, getTableInfo, createTables, getUserTenantId } from '../api/database';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
+import { supabase } from '../api/supabaseConfig';
 
 interface ScannedItem {
   id: number;
   name: string;
   price: number;
   quantity: number;
+  stock: number;
   image: string | null; // Allow null as a valid value
 }
 
@@ -22,10 +24,24 @@ const ScannedDataScreen = () => {
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [tenantId, setTenantId] = useState<number | null>(null);
   const router = useRouter();
+  const [alertVisible, setAlertVisible] = useState(false);
 
   useEffect(() => {
-    createTables();
+    getTableInfo('sales');
+    const fetchTenantId = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const tenantId = await getUserTenantId(session.user.email);
+        setTenantId(tenantId);
+      }
+    };
+
+    fetchTenantId();
+  }, []);
+
+  useEffect(() => {
     const loadStoredData = async () => {
       try {
         const storedData = await AsyncStorage.getItem('scannedItems');
@@ -47,6 +63,7 @@ const ScannedDataScreen = () => {
         const scannedDataList: ScannedItem[] = storedData ? JSON.parse(storedData) : [];
         scannedDataList.push(data);
         await AsyncStorage.setItem('scannedItems', JSON.stringify(scannedDataList));
+        setScannedItems(scannedDataList); // Actualizar el estado después de almacenar los datos
       } catch (error) {
         console.error('Error storing scannedData:', error);
       }
@@ -54,19 +71,40 @@ const ScannedDataScreen = () => {
 
     const fetchAndStoreProduct = async (id: number) => {
       try {
-        const fetchedData = await fetchProductById(id);
-        if (fetchedData) {
-          const productData: ScannedItem = {
-            id: fetchedData.id,
-            name: fetchedData.name,
-            price: fetchedData.price,
-            quantity: 1, // Asignar una cantidad inicial
-            image: fetchedData.image, // Asignar la URL de la imagen
-          };
-          setScannedItems((prevItems) => [...prevItems, productData]);
-          storeScannedData(productData);
-        } else {
-          console.error('Fetched data is null');
+        if (tenantId !== null) {
+          const fetchedData = await fetchProductById(id, tenantId);
+          if (fetchedData) {
+            if (fetchedData.stock <= 0) {
+              setSnackbarMessage(`El producto ${fetchedData.name} no tiene stock disponible`);
+              setAlertVisible(true); // Mostrar el diálogo de alerta
+              return;
+            }
+
+            if (fetchedData.stock < 20) {
+              setSnackbarMessage(`El producto ${fetchedData.name} está bajo de stock. Cantidad disponible: ${fetchedData.stock}`);
+              setSnackbarVisible(true); // Mostrar el snackbar
+            }
+
+            const productData: ScannedItem = {
+              id: fetchedData.id,
+              name: fetchedData.name,
+              price: fetchedData.price,
+              stock: fetchedData.stock,
+              quantity: 1, // Asignar una cantidad inicial
+              image: fetchedData.image, // Asignar la URL de la imagen
+            };
+
+            // Verificar si el producto ya está en la lista
+            const isProductAlreadyScanned = scannedItems.some(item => item.id === productData.id);
+            if (!isProductAlreadyScanned) {
+              setScannedItems((prevItems) => [...prevItems, productData]);
+              storeScannedData(productData);
+            } else {
+              console.log('Producto ya escaneado:', productData.id);
+            }
+          } else {
+            console.error('Fetched data is null');
+          }
         }
       } catch (error) {
         console.error('Error fetching product data:', error);
@@ -81,10 +119,11 @@ const ScannedDataScreen = () => {
         console.error('Error parsing scannedData:', error);
       }
     }
-  }, [scannedData]);
+  }, [scannedData, tenantId]); // Eliminar scannedItems como dependencia para evitar recargas innecesarias
 
   const handleRescan = () => {
-    router.push('/(tabs)');
+    setAlertVisible(false);
+    router.push('/(tabs)/two');
   };
 
   const handleClearData = async () => {
@@ -92,14 +131,17 @@ const ScannedDataScreen = () => {
       const total = scannedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
       const products = scannedItems.map(item => ({ product_id: item.id, quantity: item.quantity }));
       const date = new Date().toISOString(); // Obtener la fecha actual en formato ISO
-      await addSaleWithProducts(date, total, products);
+      if (tenantId === null) {
+        throw new Error('Tenant ID is null');
+      }
+      await addSaleWithProducts(date, total, tenantId, products);
       await AsyncStorage.clear();
       setVisible(false); // Ocultar el diálogo después de aceptar
-      
+
       setSnackbarMessage('Venta realizada con éxito');
       setSnackbarVisible(true);
 
-      router.push('/(tabs)/two'); // Redirigir a la pantalla principal
+      router.push('/(tabs)'); // Redirigir a la pantalla principal
     } catch (error) {
       console.error('Error clearing data:', error);
     }
@@ -115,10 +157,10 @@ const ScannedDataScreen = () => {
     });
   };
 
-  const handleIncreaseQuantity = (id: number) => {
+  const handleIncreaseQuantity = (id: number, stock: number) => {
     setScannedItems((prevItems) => {
       const updatedItems = prevItems.map(item =>
-        item.id === id ? { ...item, quantity: item.quantity + 1 } : item
+        item.id === id && item.quantity < stock ? { ...item, quantity: item.quantity + 1 } : item
       );
       AsyncStorage.setItem('scannedItems', JSON.stringify(updatedItems));
       return updatedItems;
@@ -130,21 +172,22 @@ const ScannedDataScreen = () => {
     setDeleteVisible(true);
   };
 
-  const confirmRemoveItem = () => {
+  const confirmRemoveItem = async () => {
     if (itemToDelete !== null) {
-      setScannedItems((prevItems) => {
-        const updatedItems = prevItems.filter(item => item.id !== itemToDelete);
-        AsyncStorage.setItem('scannedItems', JSON.stringify(updatedItems));
-        return updatedItems;
-      });
+      const updatedItems = scannedItems.filter(item => item.id !== itemToDelete);
+      setScannedItems(updatedItems);
+      await AsyncStorage.setItem('scannedItems', JSON.stringify(updatedItems));
       setDeleteVisible(false);
       setItemToDelete(null);
     }
   };
-
+  
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
   const hideDeleteDialog = () => setDeleteVisible(false);
+  const handleNavigateToTest = () => {
+    router.push('/(tabs)/two');
+  };
 
   return (
     <PaperProvider>
@@ -166,7 +209,7 @@ const ScannedDataScreen = () => {
                           <IconButton icon="minus-box" size={20} iconColor="#4f95e1" />
                         </TouchableOpacity>
                         <Text style={styles.dataText}>Cantidad: {item.quantity}</Text>
-                        <TouchableOpacity onPress={() => handleIncreaseQuantity(item.id)} style={styles.quantityButton}>
+                        <TouchableOpacity onPress={() => handleIncreaseQuantity(item.id,item.stock)} style={styles.quantityButton}>
                           <IconButton icon="plus-box" size={20} iconColor="#183762" />
                         </TouchableOpacity>
                       </View>
@@ -190,7 +233,12 @@ const ScannedDataScreen = () => {
             </View>
           </>
         ) : (
-          <Text style={styles.errorText}>No data received</Text>
+          <View style={styles.container1}>
+              <Text style={styles.infoText}>No hay productos escaneados. Por favor, escanee un producto.</Text>
+              <TouchableOpacity style={styles.navigateButton} onPress={handleNavigateToTest}>
+                <Text style={styles.buttonText}>Escanear Producto</Text>
+              </TouchableOpacity>
+          </View>
         )}
         <Portal>
           <Dialog visible={visible} onDismiss={hideDialog} style={styles.dialog}>
@@ -221,6 +269,17 @@ const ScannedDataScreen = () => {
               </Button>
             </Dialog.Actions>
           </Dialog>
+          <Dialog visible={alertVisible} onDismiss={() => setAlertVisible(false)} style={styles.dialog}>
+            <Dialog.Title style={styles.dialogTitle}>Alerta</Dialog.Title>
+            <Dialog.Content>
+              <Text style={styles.dialogText}>{snackbarMessage}</Text>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={() => handleRescan()} style={styles.dialogButton} labelStyle={styles.dialogButtonText} icon="close">
+                OK
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
         </Portal>
         <Snackbar
           visible={snackbarVisible}
@@ -229,11 +288,13 @@ const ScannedDataScreen = () => {
           action={{
             label: 'OK',
             onPress: () => {
-              setSnackbarVisible(false);
+            setSnackbarVisible(false);
             },
+            textColor: 'white',
           }}
+          style={styles.snackbarContainer}
         >
-          {snackbarMessage}
+          <Text style={{ color: 'white' }}>{snackbarMessage}</Text>
         </Snackbar>
         <Toast />
       </View>
@@ -248,10 +309,31 @@ const styles = StyleSheet.create({
     padding: 16,
     width: '100%',
   },
+  container1: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   errorText: {
     color: 'red',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  infoText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginVertical: 16,
+  },
+  snackbarContainer: {
+    backgroundColor: '#b71c1c', // Rojo oscuro
+  },
+  navigateButton: {
+    marginTop: 20, // Ajusta este valor para mover el botón más abajo
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#183762',
+    borderRadius: 5,
   },
   card: {
     marginVertical: 16,

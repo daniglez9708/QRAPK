@@ -1,23 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Card, Title, Paragraph } from 'react-native-paper';
-import { getProductById, Product } from '../api/database';
+import { getProductById, getUserTenantId, Product } from '../api/database';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { supabase } from '../api/supabaseConfig';
 
 const ProductDetails = () => {
     const [product, setProduct] = useState<Product | null>(null);
     const { productId } = useLocalSearchParams<{ productId: string }>();
+    const [tenantId, setTenantId] = useState<number | null>(null);
     const router = useRouter();
 
     useEffect(() => {
-        if (productId) {
+        const fetchTenantId = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if(!session){
+                router.replace('/screen/login')
+            }
+            if (session?.user?.email) {
+                const tenantId = await getUserTenantId(session.user.email);
+                setTenantId(tenantId);
+            }
+        };
+      
+        fetchTenantId();
+    }, []);
+
+    useEffect(() => {
+        if (productId && tenantId) {
+            
             const loadProduct = async () => {
-                const productData = await getProductById(productId);
+                const productData = await getProductById(productId, tenantId);
                 setProduct(productData);
             };
             loadProduct();
         }
-    }, [productId]);
+    }, [productId, tenantId]);
 
     if (!product) {
         return (
@@ -46,10 +64,6 @@ const ProductDetails = () => {
                     <View style={styles.detailRow}>
                         <Paragraph style={styles.label}>Stock:</Paragraph>
                         <Paragraph style={styles.value}>{product.stock}</Paragraph>
-                    </View>
-                    <View style={styles.detailRow}>
-                        <Paragraph style={styles.label}>Disponible:</Paragraph>
-                        <Paragraph style={styles.value}>{product.isAvailable ? 'Sí' : 'No'}</Paragraph>
                     </View>
                 </Card.Content>
             </Card>

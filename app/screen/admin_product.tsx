@@ -1,32 +1,93 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, Keyboard, Button,Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, Keyboard, Button, Alert, Platform } from 'react-native';
+import * as Permissions from 'expo-permissions';
+import * as MediaLibrary from 'expo-media-library';
 import { IconButton } from 'react-native-paper';
-import { getProducts, Product } from '../api/database'; // Asegúrate de ajustar la ruta según tu estructura de proyecto
-import { router } from 'expo-router';
-import ReusableTable from '@/components/ReusableTable'; // Ajusta la ruta según tu estructura de proyecto
+import { getProducts, getUserTenantId, Product } from '../api/database';
+import { router, useFocusEffect } from 'expo-router';
+import { supabase } from '../api/supabaseConfig';
+import QRCode from 'react-native-qrcode-svg';
+import ReusableTable from '@/components/ReusableTable';
+//import RNHTMLtoPDF from 'react-native-html-to-pdf';
+import * as Print from 'expo-print';
+import * as IntentLauncher from 'expo-intent-launcher';
 import * as FileSystem from 'expo-file-system';
-import { PDFDocument, PDFPage } from 'react-native-pdf-lib';
 
+interface QRCodeComponentProps {
+  value: string;
+  onGenerated: (dataUrl: string) => void;
+}
+
+const QRCodeComponent: React.FC<QRCodeComponentProps> = ({ value, onGenerated }) => {
+  useEffect(() => {
+    const qrCodeRef = {
+      toDataURL: (callback: (dataUrl: string) => void) => {
+        const qrCode = (
+          <QRCode
+            value={value}
+            size={100}
+            getRef={(c) => {
+              if (c) {
+                c.toDataURL((dataUrl: string) => {
+                  callback(dataUrl);
+                });
+              }
+            }}
+          />
+        );
+      }
+    };
+
+    qrCodeRef.toDataURL((dataUrl) => {
+      onGenerated(dataUrl);
+    });
+  }, [value, onGenerated]);
+
+  return null;
+};
 
 const AdminProduct = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [isSearchVisible, setIsSearchVisible] = useState<boolean>(false);
+  const [tenantId, setTenantId] = useState<number | null>(null);
+  const [qrCodes, setQrCodes] = useState<{ [key: string]: string }>({});
+  const [qrGenerated, setQrGenerated] = useState<boolean>(false);
+
+  const fetchTenantId = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.email) {
+      const tenantId = await getUserTenantId(session.user.email);
+      setTenantId(tenantId);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTenantId();
+  }, [fetchTenantId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchTenantId();
+    }, [fetchTenantId])
+  );
 
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const productsFromDB = await getProducts();
-        setProducts(productsFromDB);
-        setFilteredProducts(productsFromDB);
+        if (tenantId !== null) {
+          const productsFromDB = await getProducts(tenantId);
+          setProducts(productsFromDB);
+          setFilteredProducts(productsFromDB);
+        }
       } catch (error) {
         console.error('Error fetching products:', error);
       }
     };
 
     fetchProducts();
-  }, []);
+  }, [tenantId]);
 
   useEffect(() => {
     const results = products.filter(product =>
@@ -34,6 +95,12 @@ const AdminProduct = () => {
     );
     setFilteredProducts(results);
   }, [searchTerm, products]);
+
+  useEffect(() => {
+    if (Object.keys(qrCodes).length === products.length && products.length > 0) {
+      setQrGenerated(true);
+    }
+  }, [qrCodes, products]);
 
   const columns = [
     { title: 'Nombre', key: 'name' },
@@ -60,51 +127,83 @@ const AdminProduct = () => {
     ),
   }));
 
-  const rowStyle = (item: Product) => {
+  const rowStyle = (item: Product) => { 
     return item.stock < 10 ? styles.lowStockRow : null;
   };
 
-  const GeneratePDF = () => {
-    const createPDF = async () => {
-      try {
-        // Crea una nueva página PDF
-        const page1 = PDFPage
-          .create()
-          .setMediaBox(200, 200)
-          .drawText('Este es un PDF generado dinámicamente', {
-            x: 5,
-            y: 150,
-            color: '#007386',
-          })
-          .drawRectangle({
-            x: 5,
-            y: 5,
-            width: 190,
-            height: 190,
-            color: '#FF99CC',
-          })
-          .drawText('¡Texto dentro de un cuadro!', {
-            x: 50,
-            y: 75,
-            color: '#FFFFFF',
-          });
-  
-        // Crea un documento PDF con la página generada
-        const pdfPath = `${FileSystem.documentDirectory}generated.pdf`;
-        const pdfDoc = PDFDocument.create(pdfPath)
-          .addPages([page1]);
-  
-        // Escribe el PDF en el sistema de archivos
-        await pdfDoc.write();
-  
-        Alert.alert('PDF generado', `PDF guardado en: ${pdfPath}`);
-        console.log(`PDF guardado en: ${pdfPath}`);
-      } catch (error) {
-        console.error('Error al generar el PDF:', error);
-      }
-    };
+  const handleQRCodeGenerated = (productId: string, dataUrl: string) => {
+    setQrCodes((prevQrCodes) => ({
+      ...prevQrCodes,
+      [productId]: dataUrl,
+    }));
   };
 
+  const GeneratePDF = async () => {
+    try {
+      console.log('Iniciando generación de PDF...');
+      
+      // Definir el contenido HTML
+      const htmlContent = `
+        <h1>Hola, mundo!</h1>
+        <p>Este es un PDF generado a partir de HTML.</p>
+        <p>Página en blanco</p>
+      `;
+      
+      // Generar el PDF
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      console.log('PDF creado en: ' + uri);
+      
+      // Solicitar permisos de almacenamiento en Android
+      if (Platform.OS === 'android') {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permiso denegado', 'Se requieren permisos de almacenamiento para guardar el archivo.');
+          return;
+        }
+      }
+      
+      // Definir una nueva ubicación en la carpeta de descargas
+      const downloadDir = `${FileSystem.documentDirectory}Download/`;
+      await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
+      const newUri = `${downloadDir}downloaded-sample.pdf`;
+      
+      // Copiar el archivo a la nueva ubicación
+      await FileSystem.copyAsync({
+        from: uri,
+        to: newUri,
+      });
+      console.log('PDF movido a: ' + newUri);
+  
+      // Crear un asset y guardarlo en la carpeta de descargas
+      const asset = await MediaLibrary.createAssetAsync(newUri);
+      const album = await MediaLibrary.getAlbumAsync('Download');
+      
+      if (!album) {
+        await MediaLibrary.createAlbumAsync('Download', asset, false);
+      } else {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      }
+      
+      console.log('PDF guardado correctamente en la carpeta de descargas');
+      Alert.alert('PDF generado', 'PDF guardado en la carpeta de descargas');
+      
+      // Abrir el PDF
+      if (Platform.OS === 'android') {
+        const cUri = await FileSystem.getContentUriAsync(asset.uri);
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: cUri,
+          flags: 1,
+          type: 'application/pdf',
+        });
+      } else {
+        Alert.alert('Abrir PDF no está soportado en esta plataforma.');
+      }
+      
+    } catch (error) {
+      console.error('Error al generar el PDF:', error);
+      Alert.alert('Error', 'Hubo un problema al generar el PDF. Inténtalo de nuevo.');
+    }
+  };
   return (
     <TouchableWithoutFeedback onPress={() => { setIsSearchVisible(false); Keyboard.dismiss(); }}>
       <View style={styles.container}>
@@ -136,6 +235,13 @@ const AdminProduct = () => {
         </View>
         <ReusableTable columns={columns} data={data} rowStyle={rowStyle} />
         <Button title="Generar PDF con productos" onPress={GeneratePDF} />
+        {products.map(product => (
+          <QRCodeComponent
+            key={product.id}
+            value={JSON.stringify({ id: product.id })}
+            onGenerated={(dataUrl) => handleQRCodeGenerated(product.id.toString(), dataUrl)}
+          />
+        ))}
       </View>
     </TouchableWithoutFeedback>
   );
@@ -177,7 +283,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   lowStockRow: {
-    backgroundColor: '#ffcccc', // Color rojo claro
+    backgroundColor: '#ffcccc',
   },
 });
 
